@@ -1,10 +1,9 @@
-import * as pdfjsLib from 'pdfjs-dist';
-// Use the modern worker loading for Vite
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 import type { FormField } from './docxParser';
 
 // Set worker source using Vite's asset handling
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && 'Worker' in window) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 }
 
@@ -19,87 +18,94 @@ export interface PdfExtractionResult {
  * Extracts raw text and spatial layout from a PDF file.
  */
 export async function extractTextFromPdf(file: File): Promise<PdfExtractionResult> {
+    console.log('[PDF Parser] Starting extraction for file:', file.name, 'size:', file.size, 'type:', file.type);
     const arrayBuffer = await file.arrayBuffer();
+    console.log('[PDF Parser] ArrayBuffer created, length:', arrayBuffer.byteLength);
 
-    const loadingTask = pdfjsLib.getDocument({
-        data: arrayBuffer,
-        // Remove standardFontDataUrl dependency on unpkg as it's blocked by Tauri CSP
-        // and often not needed for digital DDTs. If needed, it should be bundled.
-        disableFontFace: false,
-        useSystemFonts: true,
-        isEvalSupported: false,
-    });
-    const pdfDoc = await loadingTask.promise;
+    try {
+        const loadingTask = pdfjsLib.getDocument({
+            data: arrayBuffer,
+            standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
+            disableFontFace: true,
+            useSystemFonts: true,
+            isEvalSupported: false,
+        });
+        const pdfDoc = await loadingTask.promise;
+        console.log('[PDF Parser] PDF loaded successfully. Number of pages:', pdfDoc.numPages);
 
-    let fullText = '';
-    const pages: PdfExtractionResult['pages'] = [];
+        let fullText = '';
+        const pages: PdfExtractionResult['pages'] = [];
 
-    // Iterate through all pages
-    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-        const page = await pdfDoc.getPage(pageNum);
-        const textContent = await page.getTextContent();
+        // Iterate through all pages
+        for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+            const page = await pdfDoc.getPage(pageNum);
+            const textContent = await page.getTextContent();
 
-        // Raw text
-        const pageText = textContent.items.map((item: any) => item.str).join(' ');
-        fullText += pageText + '\n';
+            // Raw text
+            const pageText = textContent.items.map((item: any) => item.str).join(' ');
+            fullText += pageText + '\n';
 
-        // Spatial grouping
-        const linesMap = new Map<number, { str: string, x: number }[]>();
+            // Spatial grouping
+            const linesMap = new Map<number, { str: string, x: number }[]>();
 
-        for (const item of textContent.items as any[]) {
-            const str = item.str.trim();
-            if (!str) continue;
+            for (const item of textContent.items as any[]) {
+                const str = item.str.trim();
+                if (!str) continue;
 
-            const x = Math.round(item.transform[4]);
-            const y = Math.round(item.transform[5]);
+                const x = Math.round(item.transform[4]);
+                const y = Math.round(item.transform[5]);
 
-            let targetY = y;
-            // Allow small y differences to be grouped together
-            for (const existingY of linesMap.keys()) {
-                if (Math.abs(existingY - y) <= 4) {
-                    targetY = existingY;
-                    break;
+                let targetY = y;
+                // Allow small y differences to be grouped together
+                for (const existingY of linesMap.keys()) {
+                    if (Math.abs(existingY - y) <= 4) {
+                        targetY = existingY;
+                        break;
+                    }
                 }
+
+                if (!linesMap.has(targetY)) {
+                    linesMap.set(targetY, []);
+                }
+                linesMap.get(targetY)!.push({ str, x });
             }
 
-            if (!linesMap.has(targetY)) {
-                linesMap.set(targetY, []);
-            }
-            linesMap.get(targetY)!.push({ str, x });
+            // Sort lines by Y descending (PDF coordinates usually have 0,0 at bottom-left)
+            const sortedY = Array.from(linesMap.keys()).sort((a, b) => b - a);
+            const lines = sortedY.map(y => {
+                const items = linesMap.get(y)!;
+                items.sort((a, b) => a.x - b.x); // Sort items left to right
+                return { y, items };
+            });
+
+            pages.push({ lines });
         }
 
-        // Sort lines by Y descending (PDF coordinates usually have 0,0 at bottom-left)
-        const sortedY = Array.from(linesMap.keys()).sort((a, b) => b - a);
-        const lines = sortedY.map(y => {
-            const items = linesMap.get(y)!;
-            items.sort((a, b) => a.x - b.x); // Sort items left to right
-            return { y, items };
-        });
-
-        pages.push({ lines });
+        console.log('[PDF Parser] Finished raw text extraction. Total characters:', fullText.length);
+        return { fullText, pages };
+    } catch (error) {
+        console.error('[PDF Parser] Error during PDF document loading:', error);
+        throw error;
     }
-
-    return { fullText, pages };
 }
 
 /**
  * Extracts specific structures known from DDT documents using spatial coordinates.
  */
 function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
+    console.log('[PDF Parser] Starting extractDdtFields logic...');
     const extractions: Record<string, string> = {};
-    if (!result.pages.length) return extractions;
+    if (!result.pages.length) {
+        console.warn('[PDF Parser] No pages found in result');
+        return extractions;
+    }
 
     const allLines = result.pages.flatMap(p => p.lines);
 
     // 1. Tipologia Documento (TIPO_DOCUMENTO)
     // Find lines that contain DDT or FATTURA near top
     for (const line of allLines) {
-        const ddtItem = line.items.find(i =>
-            i.str.includes('DDT VENDITA') ||
-            i.str.includes('FATTURA') ||
-            i.str.includes('DOCUMENTO DI TRASPORTO') ||
-            i.str.includes('BOLLA')
-        );
+        const ddtItem = line.items.find(i => i.str.includes('DDT VENDITA') || i.str.includes('FATTURA'));
         if (ddtItem) {
             extractions['tipo_documento'] = ddtItem.str;
             break;
@@ -148,6 +154,7 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
                 }
             }
         }
+        console.log('[PDF Parser] Extraction complete: Destinazione', extractions['reparto_ambulatorio'] ? 'Found' : 'Not Found');
     }
 
     // 3. Spett.le: RAGIONE_SOCIALE, INDIRIZZO, CAP, CITTA
@@ -207,6 +214,7 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
                 if (clientLines.length >= 2) extractions['indirizzo'] = clientLines[1];
             }
         }
+        console.log('[PDF Parser] Extraction complete: Spett.le', extractions['ragione_sociale'] ? 'Found' : 'Not Found');
     }
 
     // 4. ID DOCUMENTO e DATA DOC (N_RICHIESTA)
@@ -241,6 +249,7 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
         } else if (dataDocVal) {
             extractions['n_richiesta'] = dataDocVal;
         }
+        console.log('[PDF Parser] Extraction complete: N_RICHIESTA:', extractions['n_richiesta'] || 'Not Found');
     }
 
     // 5. Table Articoli (Multi-page support)
@@ -249,12 +258,7 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
 
     result.pages.forEach((page) => {
         const pageLines = page.lines;
-        const tableHeaderIdx = pageLines.findIndex(l => l.items.some(i =>
-            i.str.includes('CODICE ARTICOLO') ||
-            i.str === 'CODICE' ||
-            i.str.includes('DESCRIZIONE BENI') ||
-            i.str.includes('ARTICOLI')
-        ));
+        const tableHeaderIdx = pageLines.findIndex(l => l.items.some(i => i.str.includes('CODICE ARTICOLO') || i.str === 'CODICE'));
 
         if (tableHeaderIdx === -1) return;
 
@@ -339,6 +343,8 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
         }
     });
 
+    const artCountTotal = Object.keys(extractions).filter(k => k.startsWith('articolo_')).length;
+    console.log(`[PDF Parser] Table Articles extraction complete. Found ${artCountTotal} items.`);
     return extractions;
 }
 
@@ -347,6 +353,7 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
  * Enhanced with specific format handling for spatial parsing results.
  */
 export function autoFillFields(fields: FormField[], sourceData: string | PdfExtractionResult): FormField[] {
+    console.log('[PDF Parser] autoFillFields called with', fields.length, 'fields and sourceData type:', typeof sourceData === 'string' ? 'string' : 'PdfExtractionResult');
     let normalizedText = '';
     let spatialExtractions: Record<string, string> = {};
 
@@ -358,6 +365,7 @@ export function autoFillFields(fields: FormField[], sourceData: string | PdfExtr
     }
 
     const extractions: Record<string, string> = { ...spatialExtractions };
+    console.log('[PDF Parser] Total raw extractions found before auto-filling:', Object.keys(extractions).length);
 
     // Regex fallbacks (only populate if not already found via spatial layout)
     if (!extractions['document_number']) {
@@ -437,6 +445,9 @@ export function autoFillFields(fields: FormField[], sourceData: string | PdfExtr
             }
         }
     }
+
+    const filledCount = resultFields.filter(f => f.value).length;
+    console.log(`[PDF Parser] autoFillFields complete. Fields filled: ${filledCount}/${resultFields.length}`);
 
     return resultFields;
 }

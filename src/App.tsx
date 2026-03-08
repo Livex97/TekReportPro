@@ -93,29 +93,31 @@ function App() {
       setIsProcessing(true);
 
       try {
+        console.log('[App] Starting handleSourceUpload for:', file.name, 'type:', file.type);
         let extractedData: any = '';
-        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-        const isDocx = file.name.toLowerCase().endsWith('.docx');
-        const isDoc = file.name.toLowerCase().endsWith('.doc');
-
-        if (isPdf) {
-          console.log("Extracting from PDF:", file.name);
+        if (file.type === 'application/pdf') {
+          console.log('[App] Calling extractTextFromPdf...');
           extractedData = await extractTextFromPdf(file);
-          console.log("PDF Extraction complete. Full text length:", extractedData.fullText.length);
-        } else if (isDocx) {
-          console.log("Extracting from DOCX:", file.name);
+          console.log('[App] extractTextFromPdf returned data');
+        } else if (file.name.toLowerCase().endsWith('.docx')) {
+          console.log('[App] Calling extractTextFromDocx...');
           extractedData = await extractTextFromDocx(file);
-        } else if (isDoc) {
+          console.log('[App] extractTextFromDocx returned data');
+        } else if (file.name.toLowerCase().endsWith('.doc')) {
           alert("I file .doc non sono analizzabili automaticamente. Converti in PDF o .docx.");
         }
 
         if (extractedData) {
+          console.log('[App] Data extracted, calling autoFillFields...');
           const updatedFields = autoFillFields(formFields, extractedData);
+          console.log('[App] autoFillFields produced updatedFields');
           setFormFields(updatedFields);
+        } else {
+          console.warn('[App] No data extracted from file');
         }
       } catch (err) {
-        console.error("Error extracting text from source:", err);
-        alert("Errore nell'estrazione del testo dalla sorgente: " + (err instanceof Error ? err.message : String(err)));
+        console.error("[App] Error extracting text from source:", err);
+        alert("Errore nell'estrazione del testo dalla sorgente.");
       } finally {
         setIsProcessing(false);
       }
