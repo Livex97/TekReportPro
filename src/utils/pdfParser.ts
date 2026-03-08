@@ -1,12 +1,14 @@
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
+// @ts-ignore
+import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
+// @ts-ignore
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
+
 import type { FormField } from './docxParser';
 
 // Set worker source using the Vite-generated URL
 if (typeof window !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 }
-
 
 export interface PdfExtractionResult {
     fullText: string;
@@ -25,14 +27,18 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractionResul
 
     try {
         const loadingTask = pdfjsLib.getDocument({
-            data: arrayBuffer,
+            data: new Uint8Array(arrayBuffer),
             standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
             disableFontFace: true,
             useSystemFonts: true,
             isEvalSupported: false,
+            // Optimization for Tauri/WebView stability
+            disableStream: true,
+            disableRange: true,
         });
         const pdfDoc = await loadingTask.promise;
         console.log('[PDF Parser] PDF loaded successfully. Number of pages:', pdfDoc.numPages);
+
 
         let fullText = '';
         const pages: PdfExtractionResult['pages'] = [];
@@ -43,8 +49,8 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractionResul
         const page = await pdfDoc.getPage(pageNum);
         const textContent = await page.getTextContent();
         
-        if (!textContent || !textContent.items) {
-            console.warn(`[PDF Parser] Page ${pageNum} returned no text content items`);
+        if (!textContent || !textContent.items || !Array.isArray(textContent.items)) {
+            console.warn(`[PDF Parser] Page ${pageNum} returned no or invalid text content items:`, textContent);
             continue;
         }
 
@@ -52,25 +58,32 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractionResul
 
         // Raw text
         const pageText = textContent.items
-            .map((item: any) => item.str || '')
+            .map((item: any) => (item && item.str) ? item.str : '')
             .join(' ');
         fullText += pageText + '\n';
 
             // Spatial grouping
             const linesMap = new Map<number, { str: string, x: number }[]>();
 
-            for (const item of (textContent.items as any[])) {
-            if (!item || typeof item.str !== 'string') continue;
+            const currentItems = textContent.items as any[];
+            for (let i = 0; i < currentItems.length; i++) {
+            const item = currentItems[i];
+            if (!item || typeof item.str !== 'string' || !item.transform) continue;
             const str = item.str.trim();
             if (!str) continue;
 
             const x = Math.round(item.transform[4]);
             const y = Math.round(item.transform[5]);
 
+
             let targetY = y;
             // Allow small y differences to be grouped together
             if (linesMap.size > 0) {
-                for (const existingY of Array.from(linesMap.keys())) {
+                const existingYs: number[] = [];
+                linesMap.forEach((_, key) => existingYs.push(key));
+                
+                for (let k = 0; k < existingYs.length; k++) {
+                    const existingY = existingYs[k];
                     if (Math.abs(existingY - y) <= 4) {
                         targetY = existingY;
                         break;
@@ -85,7 +98,10 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractionResul
             }
 
             // Sort lines by Y descending (PDF coordinates usually have 0,0 at bottom-left)
-            const sortedY = Array.from(linesMap.keys()).sort((a, b) => b - a);
+            const sortedY: number[] = [];
+            linesMap.forEach((_, key) => sortedY.push(key));
+            sortedY.sort((a, b) => b - a);
+            
             const lines = sortedY.map(y => {
                 const items = linesMap.get(y)!;
                 items.sort((a, b) => a.x - b.x); // Sort items left to right
@@ -118,13 +134,15 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
 
     // 1. Tipologia Documento (TIPO_DOCUMENTO)
     // Find lines that contain DDT or FATTURA near top
-    for (const line of allLines) {
-        const ddtItem = line.items.find(i => i.str.includes('DDT VENDITA') || i.str.includes('FATTURA'));
+    for (let i = 0; i < allLines.length; i++) {
+        const line = allLines[i];
+        const ddtItem = line.items.find(it => it.str.includes('DDT VENDITA') || it.str.includes('FATTURA'));
         if (ddtItem) {
             extractions['tipo_documento'] = ddtItem.str;
             break;
         }
     }
+
 
     // 2. Destinazione: REPARTO_AMBULATORIO, INDIRIZZO, CAP, CITTA
     const destIdx = allLines.findIndex(l => l.items.some(i => i.str.includes('LUOGO DI DESTINAZIONE')));
@@ -279,7 +297,8 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
         // Initialize or update column positions if not set
         if (!colX['n']) {
             const headerItems = pageLines[tableHeaderIdx].items;
-            for (const hi of headerItems) {
+            for (let j = 0; j < headerItems.length; j++) {
+                const hi = headerItems[j];
                 if (hi.str === 'N.' || hi.str === 'N') colX['n'] = hi.x;
                 else if (hi.str.includes('CODICE ARTICOLO') || hi.str === 'CODICE') colX['codice'] = hi.x;
                 else if (hi.str.includes('DESCRIZIONE')) colX['descrizione'] = hi.x;
@@ -287,6 +306,7 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
                 else if (hi.str.includes("QUANTITA'") || hi.str === 'Q.TA') colX['quantita'] = hi.x;
                 else if (hi.str.includes('MATRICOLA') || hi.str === 'SN') colX['matricola'] = hi.x;
             }
+
 
             if (!colX['n']) colX['n'] = 25;
             if (!colX['codice']) colX['codice'] = colX['n'] + 30;
