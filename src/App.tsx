@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, ClipboardList, Info, ListCheck } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-dialog';
+import { readFile } from '@tauri-apps/plugin-fs';
+
 import { extractFieldsFromDocx, extractTextFromDocx } from './utils/docxParser';
 import type { FormField } from './utils/docxParser';
 import { autoFillFields, extractTextFromPdf } from './utils/pdfParser';
@@ -37,24 +40,30 @@ function App() {
   };
 
   // --- Settings Logic ---
-  const handleSlotUpload = async (slotId: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      if (file.name.toLowerCase().endsWith('.doc')) {
-        alert("Il formato .doc (Word 97-2003) non è supportato. Usa file .docx.");
-        return;
-      }
-      setIsProcessing(true);
-      try {
+  const handleSlotUpload = async (slotId: string) => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'Word Document', extensions: ['docx'] }]
+      });
+
+      if (selected && typeof selected === 'string') {
+        const fileName = selected.split(/[/\\]/).pop() || 'template.docx';
+        setIsProcessing(true);
+        const content = await readFile(selected);
+        const file = new File([content], fileName, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+        
         await saveTemplateFile(slotId, file);
         await loadTemplateMeta();
-      } catch (err) {
-        console.error("Error saving template", err);
-      } finally {
-        setIsProcessing(false);
       }
+    } catch (err) {
+      console.error("Error picking/saving template", err);
+      alert("Errore nel caricamento del template.");
+    } finally {
+      setIsProcessing(false);
     }
   };
+
 
   const handleDeleteSlot = async (slotId: string) => {
     console.log('[App] Attempting to delete slot:', slotId);
@@ -96,40 +105,47 @@ function App() {
   };
 
   // --- Form Logic ---
-  const handleSourceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      setIsProcessing(true);
+  const handleSourceUpload = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ 
+          name: 'Sorgente Dati', 
+          extensions: ['pdf', 'docx'] 
+        }]
+      });
 
-      try {
-        console.log('[App] Starting handleSourceUpload for:', file.name, 'type:', file.type);
+      if (selected && typeof selected === 'string') {
+        setIsProcessing(true);
+        console.log('[App] Loading source file:', selected);
+        
+        const fileName = selected.split(/[/\\]/).pop() || 'source';
+        const content = await readFile(selected);
+        
+        const isPdf = fileName.toLowerCase().endsWith('.pdf');
+        const mimeType = isPdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        
         let extractedData: any = '';
-        if (file.type === 'application/pdf') {
+        if (isPdf) {
           console.log('[App] Calling extractTextFromPdf...');
-          extractedData = await extractTextFromPdf(file);
-          console.log('[App] extractTextFromPdf returned data');
-        } else if (file.name.toLowerCase().endsWith('.docx')) {
+          extractedData = await extractTextFromPdf(content);
+        } else if (fileName.toLowerCase().endsWith('.docx')) {
           console.log('[App] Calling extractTextFromDocx...');
+          const file = new File([content], fileName, { type: mimeType });
           extractedData = await extractTextFromDocx(file);
-          console.log('[App] extractTextFromDocx returned data');
-        } else if (file.name.toLowerCase().endsWith('.doc')) {
-          alert("I file .doc non sono analizzabili automaticamente. Converti in PDF o .docx.");
         }
 
         if (extractedData) {
-          console.log('[App] Data extracted, calling autoFillFields...');
+          console.log('[App] Data extracted, auto-filling...');
           const updatedFields = autoFillFields(formFields, extractedData);
-          console.log('[App] autoFillFields produced updatedFields');
           setFormFields(updatedFields);
-        } else {
-          console.warn('[App] No data extracted from file');
         }
-      } catch (err) {
-        console.error("[App] Error extracting text from source:", err);
-        alert("Errore nell'estrazione del testo dalla sorgente.");
-      } finally {
-        setIsProcessing(false);
       }
+    } catch (err) {
+      console.error("[App] Error extracting text from source:", err);
+      alert("Errore nell'estrazione del testo dalla sorgente.");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -349,14 +365,11 @@ function App() {
                         </button>
                       )}
                       <div className="relative group overflow-hidden w-full sm:w-auto">
-                        <input
-                          type="file"
-                          accept=".docx"
-                          onChange={(e) => handleSlotUpload(id, e)}
+                        <button 
+                          onClick={() => handleSlotUpload(id)}
                           disabled={isProcessing}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                        />
-                        <button className="w-full sm:w-auto px-6 py-2 text-sm font-bold text-white bg-neutral-900 group-hover:bg-neutral-800 rounded-lg transition-colors shrink-0">
+                          className="w-full sm:w-auto px-6 py-2 text-sm font-bold text-white bg-neutral-900 hover:bg-neutral-800 rounded-lg transition-colors shrink-0 disabled:opacity-50"
+                        >
                           {meta ? 'Sostituisci' : 'Carica File DOCX'}
                         </button>
                       </div>
@@ -383,14 +396,11 @@ function App() {
               </div>
 
               <div className="relative group overflow-hidden shrink-0 hidden sm:block">
-                <input
-                  type="file"
-                  accept="application/pdf,.docx"
-                  onChange={handleSourceUpload}
+                <button 
+                  onClick={handleSourceUpload}
                   disabled={isProcessing}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                />
-                <button className="flex items-center gap-2 px-5 py-3 bg-neutral-900 hover:bg-neutral-800 text-white font-bold rounded-xl transition-colors shadow-md">
+                  className="flex items-center gap-2 px-5 py-3 bg-neutral-900 hover:bg-neutral-800 text-white font-bold rounded-xl transition-colors shadow-md disabled:opacity-50"
+                >
                   <Upload className="w-5 h-5" />
                   {isProcessing ? 'Analisi...' : 'Auto-Compila da PDF'}
                 </button>
@@ -399,14 +409,11 @@ function App() {
 
             {/* Auto compile mobile button */}
             <div className="relative group overflow-hidden sm:hidden mb-6 w-full">
-              <input
-                type="file"
-                accept="application/pdf,.docx"
-                onChange={handleSourceUpload}
+              <button 
+                onClick={handleSourceUpload}
                 disabled={isProcessing}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-              />
-              <button className="w-full flex justify-center items-center gap-2 px-5 py-4 bg-neutral-900 hover:bg-neutral-800 text-white font-bold rounded-xl transition-colors shadow-md text-lg">
+                className="w-full flex justify-center items-center gap-2 px-5 py-4 bg-neutral-900 hover:bg-neutral-800 text-white font-bold rounded-xl transition-colors shadow-md text-lg disabled:opacity-50"
+              >
                 <Upload className="w-6 h-6" />
                 {isProcessing ? 'Analisi...' : 'Auto-Compila da PDF'}
               </button>

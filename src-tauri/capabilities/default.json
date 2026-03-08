@@ -8,6 +8,14 @@
   "permissions": [
     "core:default",
     "dialog:default",
+    "fs:default",
+    "fs:allow-appdata-write-recursive",
+    "fs:allow-appdata-read-recursive",
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [{ "path": "templates" }]
+    },
+    "store:default",
     "log:default"
   ]
 }

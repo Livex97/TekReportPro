@@ -1,14 +1,35 @@
 // @ts-ignore
-import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
+import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
 import type { FormField } from './docxParser';
 
-// Set worker source using the Vite-generated URL
+// Use a more robust worker initialization for Tauri/Vite
 if (typeof window !== 'undefined') {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+    // Polyfill for ReadableStream async iterator, required for some versions of Safari/WKWebView
+    if (typeof ReadableStream !== 'undefined' && !(ReadableStream.prototype as any)[Symbol.asyncIterator]) {
+        (ReadableStream.prototype as any)[Symbol.asyncIterator] = async function* () {
+            const reader = this.getReader();
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) return;
+                    yield value;
+                }
+            } finally {
+                reader.releaseLock();
+            }
+        };
+    }
+
+    try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+    } catch (e) {
+        console.error('[PDF Parser] Failed to set workerSrc:', e);
+    }
 }
+
 
 export interface PdfExtractionResult {
     fullText: string;
@@ -18,23 +39,34 @@ export interface PdfExtractionResult {
 }
 
 /**
- * Extracts raw text and spatial layout from a PDF file.
+ * Extracts raw text and spatial layout from a PDF binary data.
  */
-export async function extractTextFromPdf(file: File): Promise<PdfExtractionResult> {
-    console.log('[PDF Parser] Starting extraction for file:', file.name, 'size:', file.size, 'type:', file.type);
-    const arrayBuffer = await file.arrayBuffer();
-    console.log('[PDF Parser] ArrayBuffer created, length:', arrayBuffer.byteLength);
+export async function extractTextFromPdf(data: Uint8Array | ArrayBuffer | File): Promise<PdfExtractionResult> {
+    let binaryData: Uint8Array;
+    
+    if (data instanceof File) {
+        console.log('[PDF Parser] Converting File to ArrayBuffer...');
+        const buffer = await data.arrayBuffer();
+        binaryData = new Uint8Array(buffer);
+    } else if (data instanceof ArrayBuffer) {
+        binaryData = new Uint8Array(data);
+    } else {
+        binaryData = data;
+    }
+
+    console.log('[PDF Parser] Starting extraction, binary size:', binaryData.byteLength);
 
     try {
         const loadingTask = pdfjsLib.getDocument({
-            data: new Uint8Array(arrayBuffer),
-            standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
+            data: binaryData,
+            standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '5.5.207'}/standard_fonts/`,
             disableFontFace: true,
             useSystemFonts: true,
             isEvalSupported: false,
-            // Optimization for Tauri/WebView stability
+            // Force disabling streams and range requests for maximum compatibility in WebView
             disableStream: true,
             disableRange: true,
+            enableXfa: false,
         });
         const pdfDoc = await loadingTask.promise;
         console.log('[PDF Parser] PDF loaded successfully. Number of pages:', pdfDoc.numPages);
@@ -49,15 +81,19 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractionResul
         const page = await pdfDoc.getPage(pageNum);
         const textContent = await page.getTextContent();
         
-        if (!textContent || !textContent.items || !Array.isArray(textContent.items)) {
-            console.warn(`[PDF Parser] Page ${pageNum} returned no or invalid text content items:`, textContent);
+        if (!textContent || !textContent.items) {
+            console.warn(`[PDF Parser] Page ${pageNum} returned no text content`);
             continue;
         }
 
-        console.log(`[PDF Parser] Page ${pageNum} items found:`, textContent.items.length);
+        const items = Array.isArray(textContent.items) 
+            ? textContent.items 
+            : (textContent.items as any)._items || []; // Catch potential non-array items
+
+        console.log(`[PDF Parser] Page ${pageNum} items found:`, items.length);
 
         // Raw text
-        const pageText = textContent.items
+        const pageText = items
             .map((item: any) => (item && item.str) ? item.str : '')
             .join(' ');
         fullText += pageText + '\n';
@@ -65,9 +101,8 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractionResul
             // Spatial grouping
             const linesMap = new Map<number, { str: string, x: number }[]>();
 
-            const currentItems = textContent.items as any[];
-            for (let i = 0; i < currentItems.length; i++) {
-            const item = currentItems[i];
+            for (let i = 0; i < items.length; i++) {
+            const item = items[i] as any;
             if (!item || typeof item.str !== 'string' || !item.transform) continue;
             const str = item.str.trim();
             if (!str) continue;

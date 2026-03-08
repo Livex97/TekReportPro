@@ -1,6 +1,7 @@
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import { saveAs } from 'file-saver';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeFile } from '@tauri-apps/plugin-fs';
 import type { FormField } from './docxParser';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -165,7 +166,16 @@ export async function getDocxBlob(file: File, fields: FormField[]): Promise<Blob
 export async function generateDocx(file: File, fields: FormField[], outputName: string = 'rapportino.docx') {
     try {
         const out = await getDocxBlob(file, fields);
-        saveAs(out, outputName);
+        const arrayBuffer = await out.arrayBuffer();
+        
+        const path = await save({
+            defaultPath: outputName,
+            filters: [{ name: 'Word Document', extensions: ['docx'] }]
+        });
+
+        if (path) {
+            await writeFile(path, new Uint8Array(arrayBuffer));
+        }
     } catch (error) {
         console.error("Error generating docx:", error);
         alert('Errore durante la generazione del DOCX. Verifica che il template sia corretto.');
