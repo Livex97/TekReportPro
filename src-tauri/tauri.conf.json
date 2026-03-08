@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Rapportini App",
         "width": 1280,
         "height": 800,

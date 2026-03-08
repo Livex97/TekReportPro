@@ -32,8 +32,10 @@ export async function getTemplateMeta(id: string): Promise<TemplateIndex | undef
  * Deletes a template from IndexedDB
  */
 export async function deleteTemplate(id: string) {
+    console.log('[Storage] Deleting template and meta for ID:', id);
     await del(`template_${id}`);
     await del(`template_meta_${id}`);
+    console.log('[Storage] Internal deletion complete');
 }
 
 /**

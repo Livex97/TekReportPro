@@ -57,9 +57,18 @@ function App() {
   };
 
   const handleDeleteSlot = async (slotId: string) => {
+    console.log('[App] Attempting to delete slot:', slotId);
     if (window.confirm("Sei sicuro di voler rimuovere questo template?")) {
-      await deleteTemplate(slotId);
-      await loadTemplateMeta();
+      console.log('[App] User confirmed deletion');
+      try {
+        await deleteTemplate(slotId);
+        console.log('[App] Deletion successful, reloading meta...');
+        await loadTemplateMeta();
+      } catch (err) {
+        console.error('[App] Error during deletion:', err);
+      }
+    } else {
+      console.log('[App] User cancelled deletion');
     }
   };
 
@@ -313,8 +322,8 @@ function App() {
                 return (
                   <div key={id} className="p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 hover:bg-neutral-50 transition-colors">
                     <div className="flex items-center gap-4 flex-1">
-                      <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 font-bold text-xl
-                        ${meta ? 'bg-primary-100 text-primary-600' : 'bg-neutral-100 text-neutral-400'}">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 font-bold text-xl
+                        ${meta ? 'bg-primary-100 text-primary-600' : 'bg-neutral-100 text-neutral-400'}`}>
                         {slotNum}
                       </div>
                       <div className="min-w-0">
