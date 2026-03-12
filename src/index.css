@@ -9,12 +9,110 @@
   
   --color-neutral-50: #f8fafc;
   --color-neutral-100: #f1f5f9;
+  --color-neutral-200: #e2e8f0;
+  --color-neutral-300: #cbd5e1;
+  --color-neutral-400: #94a3b8;
+  --color-neutral-500: #64748b;
+  --color-neutral-600: #475569;
+  --color-neutral-700: #334155;
   --color-neutral-800: #1e293b;
   --color-neutral-900: #0f172a;
 }
 
+/* Tailwind v4 class-based dark mode variant */
+@variant dark (&:where(.dark, .dark *));
+
 @layer base {
-  body {
-    @apply bg-neutral-50 text-neutral-900 font-sans antialiased;
+  :root {
+    color-scheme: light;
   }
+
+  :root.dark {
+    color-scheme: dark;
+  }
+
+  /* Avoid @apply for base background to prevent Vite/Tailwind v4 build issues with unknown utilities in some contexts */
+  body {
+    background-color: #f8fafc;
+    color: #0f172a;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.3s, color 0.3s;
+  }
+
+  .dark body {
+    background-color: #0f172a;
+    color: #f8fafc;
+  }
+}
+
+/* Tailwind Utility Overrides for Dark Mode */
+@layer utilities {
+  .dark .bg-white { background-color: #1e293b !important; }
+  .dark .bg-neutral-50 { background-color: #0f172a !important; }
+  .dark .bg-neutral-100 { background-color: #334155 !important; }
+  .dark .bg-neutral-50\/50 { background-color: rgba(30, 41, 59, 0.4) !important; }
+  
+  .dark .text-neutral-900 { color: #f8fafc !important; }
+  .dark .text-neutral-800 { color: #f1f5f9 !important; }
+  .dark .text-neutral-700 { color: #e2e8f0 !important; }
+  .dark .text-neutral-600 { color: #cbd5e1 !important; }
+  .dark .text-neutral-400 { color: #94a3b8 !important; }
+  
+  .dark .border-neutral-100 { border-color: #334155 !important; }
+  .dark .border-neutral-200 { border-color: #334155 !important; }
+  .dark .border-neutral-700 { border-color: #475569 !important; }
+}
+
+/* Drag & Drop Visual Feedback - Use direct CSS for reliability */
+.drag-over-section {
+  border: 2px dashed #3b82f6 !important;
+  background-color: rgba(59, 130, 246, 0.08) !important;
+  transition: all 0.2s ease;
+  transform: translateY(-2px);
+}
+
+.group\/field-wrapper {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
+.field-dragging {
+  border: 2px dashed #94a3b8 !important;
+  background-color: #f1f5f9 !important;
+  opacity: 0.15 !important;
+  transform: scale(0.98);
+}
+
+.dark .field-dragging {
+  background-color: #1e293b !important;
+  border-color: #475569 !important;
+}
+
+[draggable="true"] {
+  cursor: grab;
+}
+
+[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Form Polish for Dark Mode */
+.dark input {
+  background-color: transparent !important;
+  color: #fff !important;
+}
+
+.dark input::placeholder {
+  color: #475569 !important;
+}
+
+/* Allow custom icon colors in dark mode (removed restrictive global color) */
+
+/* Ensure the Move to Section dropdown is visible and premium */
+.dark .group\/move div {
+  background-color: #1e293b;
+  border-color: #475569;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
 }

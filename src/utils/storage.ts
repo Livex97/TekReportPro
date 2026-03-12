@@ -85,3 +85,50 @@ export async function getAllTemplatesMeta(): Promise<(TemplateIndex | undefined)
     return [meta1, meta2, meta3];
 }
 
+/**
+ * Generic setting getter
+ */
+export async function getSetting<T>(key: string, defaultValue: T): Promise<T> {
+    const store = await getStore();
+    const val = await store.get<T>(key);
+    return val !== null && val !== undefined ? val : defaultValue;
+}
+
+/**
+ * Generic setting setter
+ */
+export async function setSetting<T>(key: string, value: T): Promise<void> {
+    const store = await getStore();
+    await store.set(key, value);
+    await store.save();
+}
+
+/**
+ * Specifically for technicians list
+ */
+export async function getTechnicians(): Promise<string[]> {
+    return await getSetting<string[]>('technicians', []);
+}
+
+export async function setTechnicians(techs: string[]): Promise<void> {
+    await setSetting('technicians', techs);
+}
+
+/**
+ * Management of custom layout (mapping field IDs to sections and order)
+ */
+export interface CustomLayout {
+    [fieldId: string]: {
+        sectionId: string;
+        order: number;
+    };
+}
+
+export async function getCustomLayout(slotId: string): Promise<CustomLayout> {
+    return await getSetting<CustomLayout>(`custom_layout_${slotId}`, {});
+}
+
+export async function setCustomLayout(slotId: string, layout: CustomLayout): Promise<void> {
+    await setSetting(`custom_layout_${slotId}`, layout);
+}
+
