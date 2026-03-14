@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, ClipboardList, ListCheck, Sun, Moon, Plus, Trash2 } from 'lucide-react';
+import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, ClipboardList, ListCheck, Sun, Moon, Plus, Trash2, Brain, Database } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 
@@ -7,10 +7,11 @@ import { extractFieldsFromDocx, extractTextFromDocx } from './utils/docxParser';
 import type { FormField } from './utils/docxParser';
 import { autoFillFields, extractTextFromPdf } from './utils/pdfParser';
 import { generateDocx } from './utils/documentGenerator';
-import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout } from './utils/storage';
+import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath } from './utils/storage';
+import AIExtraction from './AIExtraction';
 import './App.css';
 
-type View = 'home' | 'settings' | 'form' | 'download';
+type View = 'home' | 'settings' | 'form' | 'download' | 'ai-extraction';
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('home');
@@ -21,6 +22,7 @@ function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [technicians, setTechniciansList] = useState<string[]>([]);
   const [newTechName, setNewTechName] = useState('');
+  const [csvPath, setCsvPathState] = useState('');
   const [customLayout, setCustomLayoutState] = useState<CustomLayout>({});
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
 
@@ -47,6 +49,9 @@ function App() {
 
     const techs = await getTechnicians();
     setTechniciansList(techs);
+
+    const savedCsvPath = await getCsvPath();
+    setCsvPathState(savedCsvPath);
   };
 
   const applyTheme = (t: 'light' | 'dark') => {
@@ -363,6 +368,13 @@ function App() {
             >
               {theme === 'light' ? <Moon className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
             </button>
+            <button
+              onClick={() => { setCurrentView('ai-extraction'); setTemplateFile(null); setFormFields([]); }}
+              className="p-2 text-neutral-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
+              title="Estrazione AI Automatica"
+            >
+              <Brain className="w-6 h-6" />
+            </button>
             {currentView !== 'settings' && (
               <button
                 onClick={() => setCurrentView('settings')}
@@ -551,6 +563,39 @@ function App() {
                     Nessun tecnico aggiunto.
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* CSV Database Settings */}
+            <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+              <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
+                <Database className="w-6 h-6 text-emerald-500" />
+                Database CSV Pandetta
+              </h3>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Seleziona il file CSV principale in cui verranno salvati tutti gli interventi elaborati dall'AI.</p>
+              
+              <div className="flex gap-3 items-center">
+                <input
+                  type="text"
+                  readOnly
+                  value={csvPath || 'Nessun file selezionato...'}
+                  className="flex-1 px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
+                />
+                <button
+                  onClick={async () => {
+                    const selected = await open({
+                        multiple: false,
+                        filters: [{ name: 'CSV Document', extensions: ['csv'] }]
+                    });
+                    if (selected && typeof selected === 'string') {
+                        setCsvPathState(selected);
+                        await setCsvPath(selected);
+                    }
+                  }}
+                  className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors"
+                >
+                  Seleziona CSV
+                </button>
               </div>
             </div>
 
@@ -845,6 +890,11 @@ function App() {
               </button>
             </div>
           </div>
+        )}
+
+        {/* --- VIEW: AI EXTRACTION --- */}
+        {currentView === 'ai-extraction' && (
+          <AIExtraction onBack={handleGoHome} theme={theme} />
         )}
       </main>
 

@@ -115,6 +115,17 @@ export async function setTechnicians(techs: string[]): Promise<void> {
 }
 
 /**
+ * Specifically for CSV file path
+ */
+export async function getCsvPath(): Promise<string> {
+    return await getSetting<string>('csvPath', '');
+}
+
+export async function setCsvPath(path: string): Promise<void> {
+    await setSetting('csvPath', path);
+}
+
+/**
  * Management of custom layout (mapping field IDs to sections and order)
  */
 export interface CustomLayout {
