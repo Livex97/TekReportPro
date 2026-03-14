@@ -143,3 +143,27 @@ export async function setCustomLayout(slotId: string, layout: CustomLayout): Pro
     await setSetting(`custom_layout_${slotId}`, layout);
 }
 
+export interface AiSettings {
+    ollamaUrl: string;
+    ollamaModel: string;
+    temperature: number;
+    numPredict: number;
+    systemPrompt?: string;
+    notificationsEnabled: boolean;
+}
+
+export const DEFAULT_AI_SETTINGS: AiSettings = {
+    ollamaUrl: 'http://127.0.0.1:11434',
+    ollamaModel: 'llama3.2',
+    temperature: 0,
+    numPredict: 350,
+    notificationsEnabled: true
+};
+
+export async function getAiSettings(): Promise<AiSettings> {
+    return await getSetting<AiSettings>('ai_settings', DEFAULT_AI_SETTINGS);
+}
+
+export async function setAiSettings(settings: AiSettings): Promise<void> {
+    await setSetting('ai_settings', settings);
+}

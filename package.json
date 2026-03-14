@@ -16,6 +16,7 @@
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-log": "^2.8.0",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-store": "^2.4.2",
     "@xmldom/xmldom": "^0.8.11",
     "docxtemplater": "^3.68.3",
@@ -27,6 +28,7 @@
     "mammoth": "^1.11.0",
     "pdfjs-dist": "^5.5.207",
     "pizzip": "^3.2.0",
+    "postal-mime": "^2.7.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tailwindcss": "^4.2.1"

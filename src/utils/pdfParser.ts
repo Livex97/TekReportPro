@@ -92,12 +92,6 @@ export async function extractTextFromPdf(data: Uint8Array | ArrayBuffer | File):
 
         console.log(`[PDF Parser] Page ${pageNum} items found:`, items.length);
 
-        // Raw text
-        const pageText = items
-            .map((item: any) => (item && item.str) ? item.str : '')
-            .join(' ');
-        fullText += pageText + '\n';
-
             // Spatial grouping
             const linesMap = new Map<number, { str: string, x: number }[]>();
 
@@ -139,9 +133,17 @@ export async function extractTextFromPdf(data: Uint8Array | ArrayBuffer | File):
             
             const lines = sortedY.map(y => {
                 const items = linesMap.get(y)!;
-                items.sort((a, b) => a.x - b.x); // Sort items left to right
+                // Sort items left to right
+                items.sort((a, b) => a.x - b.x); 
                 return { y, items };
             });
+
+            // Build structured text preserving columns using visual spacing relative to X
+            const structuredPageText = lines.map(line => {
+                return line.items.map(it => it.str).join(' | ');
+            }).join('\n');
+            
+            fullText += structuredPageText + '\n\n';
 
             pages.push({ lines });
         }

@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react';
 import { ArrowLeft, Upload, FileText, Database, CheckCircle, Brain, RefreshCw } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
+import { listen } from '@tauri-apps/api/event';
 import { extractTextFromPdf } from './utils/pdfParser';
 import { generateOllamaExtraction, type ExtractedData } from './utils/ollama';
 import { checkDuplicateInCsv, appendRowToCsv } from './utils/csvHandler';
 import { getCsvPath } from './utils/storage';
+import { sendAppNotification } from './utils/notifications';
+import PostalMime from 'postal-mime';
 
 interface AIExtractionProps {
     onBack: () => void;
@@ -22,6 +25,7 @@ export function AIExtraction({ onBack }: AIExtractionProps) {
     const [abortController, setAbortController] = useState<AbortController | null>(null);
     const [executionTime, setExecutionTime] = useState<number | null>(null);
     const [timerValue, setTimerValue] = useState<number>(0);
+    const [isDragging, setIsDragging] = useState(false);
 
     useEffect(() => {
         let interval: any;
@@ -38,6 +42,45 @@ export function AIExtraction({ onBack }: AIExtractionProps) {
     }, [isProcessing]);
 
     useEffect(() => {
+        let unlistenDrop: any = null;
+        let unlistenEnter: any = null;
+        let unlistenLeave: any = null;
+
+        const setupTauriEvents = async () => {
+            unlistenEnter = await listen('tauri://drag-enter', () => {
+                setIsDragging(true);
+            });
+
+            unlistenLeave = await listen('tauri://drag-leave', () => {
+                setIsDragging(false);
+            });
+
+            unlistenDrop = await listen('tauri://drag-drop', async (event: any) => {
+                setIsDragging(false);
+                const paths = event.payload.paths;
+                if (paths && paths.length > 0) {
+                    try {
+                        const filePath = paths[0];
+                        const fileName = filePath.split(/[/\\]/).pop() || '';
+                        const content = await readFile(filePath);
+                        await processFileContent(fileName, content);
+                    } catch (error) {
+                        console.error("Errore durante il caricamento del file:", error);
+                    }
+                }
+            });
+        };
+
+        setupTauriEvents();
+
+        return () => {
+            if (unlistenDrop) unlistenDrop();
+            if (unlistenEnter) unlistenEnter();
+            if (unlistenLeave) unlistenLeave();
+        };
+    }, []);
+
+    useEffect(() => {
         loadCsvPath();
         return () => {
             if (abortController) abortController.abort();
@@ -49,6 +92,47 @@ export function AIExtraction({ onBack }: AIExtractionProps) {
         setCsvPath(path);
     };
 
+    const processFileContent = async (fileName: string, content: Uint8Array) => {
+        setIsProcessing(false);
+        setSaveStatus(null);
+        
+        let text = '';
+        if (fileName.toLowerCase().endsWith('.pdf')) {
+            const pdfResult = await extractTextFromPdf(content);
+            text = pdfResult.fullText;
+        } else if (fileName.toLowerCase().endsWith('.eml')) {
+            const parser = new PostalMime();
+            const email = await parser.parse(content as any);
+            
+            const metaFrom = email.from?.address || email.from?.name || '';
+            const metaSubject = email.subject || '';
+            const metaDate = email.date || '';
+            
+            let bodyText = email.text || '';
+            if (!bodyText && email.html) {
+                bodyText = email.html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                                   .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                                   .replace(/<[^>]*>?/gm, ' ')
+                                   .replace(/\s+/g, ' ')
+                                   .trim();
+            }
+            
+            text = `METADATI:
+Da: ${metaFrom}
+Oggetto: ${metaSubject}
+Data: ${metaDate}
+
+CORPO:
+${bodyText}`;
+        } else {
+            const decoder = new TextDecoder();
+            text = decoder.decode(content);
+        }
+
+        setSourceText(text);
+        setExtracted(null);
+    };
+
     const handleFileUpload = async () => {
         try {
             const selected = await open({
@@ -57,22 +141,9 @@ export function AIExtraction({ onBack }: AIExtractionProps) {
             });
 
             if (selected && typeof selected === 'string') {
-                setIsProcessing(false); // Non avviamo il caricamento visivo dell'AI qui
-                setSaveStatus(null);
                 const fileName = selected.split(/[/\\]/).pop() || '';
                 const content = await readFile(selected);
-                
-                let text = '';
-                if (fileName.toLowerCase().endsWith('.pdf')) {
-                    const pdfResult = await extractTextFromPdf(content);
-                    text = pdfResult.fullText;
-                } else {
-                    const decoder = new TextDecoder();
-                    text = decoder.decode(content);
-                }
-
-                setSourceText(text);
-                setExtracted(null); // Reset dei dati estratti precedenti
+                await processFileContent(fileName, content);
             }
         } catch (error) {
             console.error(error);
@@ -80,6 +151,7 @@ export function AIExtraction({ onBack }: AIExtractionProps) {
             setIsProcessing(false);
         }
     };
+
 
     const processTextWithAI = async (text: string) => {
         if (!text.trim()) {
@@ -100,6 +172,7 @@ export function AIExtraction({ onBack }: AIExtractionProps) {
             const endTime = Date.now();
             setExecutionTime((endTime - startTime) / 1000);
             setExtracted(result);
+            sendAppNotification("Analisi Completata", `Dati estratti con successo per ${result.cliente || 'il cliente'}.`);
         } catch (error: any) {
             if (error.name === 'AbortError') {
                 setSaveStatus({ type: 'warning', msg: 'Analisi interrotta dall\'utente.' });
@@ -161,7 +234,20 @@ export function AIExtraction({ onBack }: AIExtractionProps) {
     };
 
     return (
-        <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
+            {isDragging && (
+                <div 
+                    className="fixed inset-0 z-[9999] flex items-center justify-center p-12 bg-black/40 backdrop-blur-sm pointer-events-none"
+                >
+                    <div 
+                        className="w-full h-full border-4 border-dashed border-primary-500 rounded-3xl flex flex-col items-center justify-center bg-white dark:bg-neutral-900 shadow-2xl animate-in zoom-in-95 duration-200"
+                    >
+                        <Upload className="w-20 h-20 text-primary-500 mb-4 animate-bounce" />
+                        <h3 className="text-3xl font-black text-neutral-900 dark:text-white mb-2 text-center px-4">Rilascia il file per l'estrazione</h3>
+                        <p className="text-xl text-neutral-600 dark:text-neutral-400 text-center px-4">PDF, TXT o EML verranno elaborati automaticamente</p>
+                    </div>
+                </div>
+            )}
             <div className="flex items-center gap-4 mb-8">
                 <button
                     onClick={onBack}

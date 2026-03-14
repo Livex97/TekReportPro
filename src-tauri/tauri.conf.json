@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "RapportiniApp",
   "version": "0.7.0",
-  "identifier": "com.rapportini.app",
+  "identifier": "com.rapportini.assistant",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",

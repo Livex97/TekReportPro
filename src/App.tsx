@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, ClipboardList, ListCheck, Sun, Moon, Plus, Trash2, Brain, Database } from 'lucide-react';
+import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, ClipboardList, ListCheck, Sun, Moon, Plus, Trash2, Brain, Database, Bell } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 
@@ -7,7 +7,8 @@ import { extractFieldsFromDocx, extractTextFromDocx } from './utils/docxParser';
 import type { FormField } from './utils/docxParser';
 import { autoFillFields, extractTextFromPdf } from './utils/pdfParser';
 import { generateDocx } from './utils/documentGenerator';
-import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath } from './utils/storage';
+import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS } from './utils/storage';
+import { DEFAULT_SYSTEM_PROMPT } from './utils/ollama';
 import AIExtraction from './AIExtraction';
 import './App.css';
 
@@ -24,6 +25,7 @@ function App() {
   const [newTechName, setNewTechName] = useState('');
   const [csvPath, setCsvPathState] = useState('');
   const [customLayout, setCustomLayoutState] = useState<CustomLayout>({});
+  const [aiSettings, setAiSettingsState] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
 
   // Form State
@@ -31,8 +33,6 @@ function App() {
   const [formFields, setFormFields] = useState<FormField[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [deleteConfirming, setDeleteConfirming] = useState<string | null>(null);
-
-  // No D&D state needed
 
   useEffect(() => {
     loadInitialData();
@@ -52,7 +52,11 @@ function App() {
 
     const savedCsvPath = await getCsvPath();
     setCsvPathState(savedCsvPath);
+
+    const savedAiSettings = await getAiSettings();
+    setAiSettingsState(savedAiSettings);
   };
+
 
   const applyTheme = (t: 'light' | 'dark') => {
     if (t === 'dark') {
@@ -599,7 +603,160 @@ function App() {
               </div>
             </div>
 
+            {/* AI Settings */}
+            <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <Brain className="w-6 h-6 text-primary-600" />
+                  Impostazioni Intelligenza Artificiale
+                </h3>
+                <button
+                  onClick={async () => {
+                    setIsProcessing(true);
+                    await setAiSettings(aiSettings);
+                    setIsProcessing(false);
+                  }}
+                  className="px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 text-sm shadow-sm shadow-primary-500/20"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Salva Impostazioni AI
+                </button>
+              </div>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Configura i parametri per la connessione a Ollama e il comportamento del modello AI.</p>
+              
+              <div className="space-y-6">
+                <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                      <Bell className={`w-5 h-5 ${aiSettings.notificationsEnabled ? 'text-primary-600' : 'text-neutral-400'}`} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Notifiche Completamento</h4>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs text-neutral-500">Invia una notifica quando l'analisi IA è terminata.</p>
+                        {aiSettings.notificationsEnabled && (
+                          <button 
+                            onClick={() => import('./utils/notifications').then(m => m.sendAppNotification("Test Notifica", "Se vedi questo, le notifiche funzionano!"))}
+                            className="text-[10px] bg-neutral-200 dark:bg-neutral-700 px-2 py-0.5 rounded hover:bg-neutral-300 transition-colors"
+                          >
+                            Invia Test
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const newValue = !aiSettings.notificationsEnabled;
+                      if (newValue) {
+                        try {
+                          const { requestPermission, isPermissionGranted } = await import('@tauri-apps/plugin-notification');
+                          let hasPermission = await isPermissionGranted();
+                          if (!hasPermission) {
+                            await requestPermission();
+                          }
+                        } catch (e) {
+                          console.error('Notification plugin error:', e);
+                        }
+                      }
+                      setAiSettingsState({ ...aiSettings, notificationsEnabled: newValue });
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500
+                      ${aiSettings.notificationsEnabled ? 'bg-primary-600' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                        ${aiSettings.notificationsEnabled ? 'translate-x-6' : 'translate-x-1'}`}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Endpoint Ollama URL</label>
+                    <input
+                      type="text"
+                      value={aiSettings.ollamaUrl}
+                      onChange={(e) => setAiSettingsState({ ...aiSettings, ollamaUrl: e.target.value })}
+                      placeholder="http://127.0.0.1:11434"
+                      className="w-full px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Modello (Model Name)</label>
+                    <input
+                      type="text"
+                      value={aiSettings.ollamaModel}
+                      onChange={(e) => setAiSettingsState({ ...aiSettings, ollamaModel: e.target.value })}
+                      placeholder="llama3.2"
+                      className="w-full px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Temperatura ({aiSettings.temperature})</label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={aiSettings.temperature}
+                      onChange={(e) => setAiSettingsState({ ...aiSettings, temperature: parseFloat(e.target.value) })}
+                      className="w-full h-2 bg-neutral-200 dark:bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-primary-600"
+                    />
+                    <div className="flex justify-between text-[10px] text-neutral-400 mt-1">
+                      <span>Rigoroso (0)</span>
+                      <span>Creativo (1)</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Max Tokens ({aiSettings.numPredict})</label>
+                    <input
+                      type="number"
+                      value={aiSettings.numPredict}
+                      onChange={(e) => setAiSettingsState({ ...aiSettings, numPredict: parseInt(e.target.value) || 0 })}
+                      className="w-full px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest">Istruzioni di Sistema (Custom Prompt Override)</label>
+                    <button
+                      onClick={() => setAiSettingsState({ ...aiSettings, systemPrompt: '' })}
+                      className="text-[10px] font-bold text-primary-600 hover:text-primary-700 underline"
+                    >
+                      Ripristina Default
+                    </button>
+                  </div>
+                  <textarea
+                    value={aiSettings.systemPrompt || ''}
+                    onChange={(e) => setAiSettingsState({ ...aiSettings, systemPrompt: e.target.value })}
+                    placeholder="Il testo inserito qui sovrascriverà il prompt di default..."
+                    className="w-full h-48 px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 resize-none font-mono text-xs"
+                  />
+                  
+                  {!aiSettings.systemPrompt && (
+                    <div className="mt-4 p-4 bg-neutral-50 dark:bg-neutral-900/50 rounded-xl border border-neutral-100 dark:border-neutral-700">
+                      <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <Brain className="w-3 h-3" />
+                        Prompt In Uso (Default):
+                      </p>
+                      <pre className="text-[10px] text-neutral-500 whitespace-pre-wrap font-sans leading-relaxed italic">
+                        {DEFAULT_SYSTEM_PROMPT}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+
             {isProcessing && <div className="mt-4 text-center text-primary-600 font-semibold animate-pulse">Salvataggio in corso...</div>}
+
           </div>
         )}
 
