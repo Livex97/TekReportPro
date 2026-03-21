@@ -1,5 +1,8 @@
 import { load, Store } from '@tauri-apps/plugin-store';
-import { writeFile, readFile, remove, BaseDirectory, mkdir } from '@tauri-apps/plugin-fs';
+import { writeFile, readFile, remove, BaseDirectory, mkdir, readDir } from '@tauri-apps/plugin-fs';
+import { getVersion } from '@tauri-apps/api/app';
+import { check } from '@tauri-apps/plugin-updater';
+import { listen } from '@tauri-apps/api/event';
 
 let _store: Store | null = null;
 
@@ -143,7 +146,6 @@ export async function setSavePath(path: string): Promise<void> {
 export async function getNextDocNumber(dirPath: string): Promise<string> {
     if (!dirPath) return '';
     try {
-        const { readDir } = await import('@tauri-apps/plugin-fs');
         const entries = await readDir(dirPath);
         
         let maxNum = 0;
@@ -275,7 +277,6 @@ export type UpdateInfo = {
 // ===========================
 
 export async function getCurrentVersion(): Promise<string> {
-  const { getVersion } = await import('@tauri-apps/api/app');
   return await getVersion();
 }
 
@@ -291,7 +292,6 @@ export async function checkForUpdates(): Promise<{
   date?: string | null;
 }> {
   try {
-    const { check } = await import('@tauri-apps/plugin-updater');
     const update = await check();
     
     if (!update) {
@@ -319,7 +319,6 @@ export async function checkForUpdates(): Promise<{
 
 export async function installUpdate(): Promise<void> {
   try {
-    const { check } = await import('@tauri-apps/plugin-updater');
     const update = await check();
     if (update) {
         await update.downloadAndInstall();
@@ -330,17 +329,12 @@ export async function installUpdate(): Promise<void> {
   }
 }
 
-// Event listeners per aggiornamenti (non più usati, ma留per compatibilità)
 export function onUpdateAvailable(callback: (payload: any) => void): void {
-  import('@tauri-apps/api/event').then(({ listen }) => {
-    listen('update-available', (event) => callback(event.payload));
-  }).catch(console.error);
+  listen('update-available', (event) => callback(event.payload)).catch(console.error);
 }
 
 export function onUpdateDownloaded(callback: () => void): void {
-  import('@tauri-apps/api/event').then(({ listen }) => {
-    listen('update-downloaded', () => callback());
-  }).catch(console.error);
+  listen('update-downloaded', () => callback()).catch(console.error);
 }
 // ===========================
 // BACKUP & RESTORE (Task 13 & 14)

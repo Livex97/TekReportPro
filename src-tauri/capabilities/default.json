@@ -11,6 +11,8 @@
     "fs:default",
     "fs:allow-appdata-write-recursive",
     "fs:allow-appdata-read-recursive",
+    "fs:allow-desktop-read-recursive",
+    "fs:allow-desktop-write-recursive",
     {
       "identifier": "fs:allow-mkdir",
       "allow": [{ "path": "templates" }]

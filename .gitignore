@@ -30,3 +30,6 @@ src-tauri/target/
 test-pdf-output.txt
 test-pdf.cjs
 parsePdf.js
+
+# Tauri signing keys
+.tauri/

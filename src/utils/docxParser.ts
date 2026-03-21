@@ -8,6 +8,8 @@ export interface FormField {
     value: string;
     type: 'text' | 'textarea' | 'checkbox';
     group?: string; // For grouping radio/checkbox options together
+    isDynamic?: boolean;
+    groupId?: string;
 }
 
 /**

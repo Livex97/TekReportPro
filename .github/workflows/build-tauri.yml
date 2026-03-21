@@ -60,6 +60,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: 'RapportiniApp ${{ github.ref_name }}'
@@ -71,6 +73,107 @@ jobs:
             - **macOS (Apple Silicon)**: `.dmg` (aarch64)
             - **macOS (Intel)**: `.dmg` (x86_64)
             - **Linux**: `.AppImage` o `.deb`
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  generate-updater-manifest:
+    needs: build-tauri
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Generate and upload updater JSON
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = context.ref.replace('refs/tags/', '');
+            
+            console.log(`Fetching release for tag: ${tag}`);
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner,
+              repo,
+              tag,
+            });
+            
+            const manifest = {
+              version: tag.replace(/^v/, ''),
+              notes: release.body || '',
+              pub_date: release.published_at,
+              platforms: {}
+            };
+            
+            const assets = release.assets;
+            console.log(`Found ${assets.length} assets`);
+            
+            const sigAssets = assets.filter(a => a.name.endsWith('.sig'));
+            
+            for (const sigAsset of sigAssets) {
+              const binaryName = sigAsset.name.replace('.sig', '');
+              const binaryAsset = assets.find(a => a.name === binaryName);
+              
+              if (!binaryAsset) {
+                console.log(`No binary found for signature ${sigAsset.name}`);
+                continue;
+              }
+              
+              console.log(`Downloading signature for ${binaryName}`);
+              const res = await fetch(sigAsset.browser_download_url);
+              const signature = (await res.text()).trim();
+              
+              let platform = '';
+              if (binaryName.includes('aarch64') && (binaryName.endsWith('.dmg') || binaryName.endsWith('.zip'))) {
+                platform = 'darwin-aarch64';
+              } else if (binaryName.includes('x64') && (binaryName.endsWith('.dmg') || binaryName.endsWith('.zip'))) {
+                platform = 'darwin-x86_64';
+              } else if (binaryName.includes('amd64') && binaryName.endsWith('.AppImage')) {
+                platform = 'linux-x86_64';
+              } else if (binaryName.includes('x64') && binaryName.endsWith('.msi')) {
+                platform = 'windows-x86_64';
+              } else if (binaryName.includes('x64') && binaryName.endsWith('.exe')) {
+                if (!manifest.platforms['windows-x86_64']) {
+                    platform = 'windows-x86_64';
+                }
+              }
+              
+              if (platform) {
+                manifest.platforms[platform] = {
+                  signature,
+                  url: binaryAsset.browser_download_url
+                };
+                console.log(`Added platform ${platform}`);
+              } else {
+                console.log(`Could not map ${binaryName} to a platform`);
+              }
+            }
+            
+            const fs = require('fs');
+            const manifestJson = JSON.stringify(manifest, null, 2);
+            fs.writeFileSync('latest.json', manifestJson);
+            console.log('Manifest content:', manifestJson);
+            
+            const fileData = fs.readFileSync('latest.json');
+            
+            const existingAsset = assets.find(a => a.name === 'latest.json');
+            if (existingAsset) {
+              console.log(`Deleting existing latest.json (ID: ${existingAsset.id})`);
+              await github.rest.repos.deleteReleaseAsset({
+                owner,
+                repo,
+                asset_id: existingAsset.id
+              });
+            }
+            
+            console.log('Uploading latest.json');
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: release.id,
+              name: 'latest.json',
+              data: fileData
+            });
+            console.log('Successfully uploaded latest.json');
+

@@ -6,9 +6,9 @@
   "plugins": {
     "updater": {
       "active": true,
-      "pubkey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2pdMloz7YoSnJ6mg21RHR2XflDA5VsevMzla8jjCnij33+8IYH98Z9Ns5lrqrOqwUxWbRq2RR50AL24TMHbum/yNH3+12iCS85lZjmoZd8Zaz1TNCdiCJ058QlSJa8PpIyBiPb8HioWaSym0KVpId0Aj/3JnhkisQ4vQ2mCelMki6iH2uJVl5IqH9uCrqXgL7Pq+HpikuXdcoU4HXr9sZRYxeUGcx5EUk5FBjl2rxkWRefN2m7og4A9B4xMDvxgApb/mYyJ0fqp2/AgWBtVbFacX2sB61ya9aIPnaGlUk2JbBhRNGAJllUZiz/sJhgr9f28QelVabKOLTl/bRYcKPwIDAQAB",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMxODU4MTgwRkZBMDZCREIKUldUYmE2RC9nSUdGd2VtRW5xZURUN0poRXZ5K3BvYXhHQWxwSmJCempHOGVhUklSdkc0ZEFIM2cK",
       "endpoints": [
-        "https://api.github.com/repos/Livex97/RapportiniApp/releases/latest"
+        "https://github.com/Livex97/RapportiniApp/releases/latest/download/latest.json"
       ],
       "dialog": true,
       "windows": {
