@@ -35,49 +35,75 @@ export async function getDocxBlob(file: File, fields: FormField[]): Promise<Blob
     // Process XML modifications first
     let xml = zip.file("word/document.xml")?.asText();
     if (xml) {
-        // 1. Process Row Duplication (must happen before Docxtemplater parses the template)
-        const maxQ = fields.reduce((max, f) => {
-            const m = f.label.match(/Q\s*_\s*(\d+)/i) || f.id.match(/q\s*_\s*(\d+)/i);
-            return m ? Math.max(max, parseInt(m[1])) : max;
-        }, 0);
+        // 1. Process Row Duplication (Generic for any indexed tags _1, _2, ...)
+        const rows = xml.match(/<w:tr(?:>|\s[^>]*>).*?<\/w:tr>/gs) || [];
+        let modifiedXml = xml;
 
-        if (maxQ > 0) {
-            const rows = xml.match(/<w:tr(?:>|\s[^>]*>).*?<\/w:tr>/gs) || [];
-            let maxExistingN = 0;
-            let lastRowWithTag = "";
-            let templateRow = "";
+        for (const row of rows) {
+            // Find all tags in this row: {{TAG_1}}, {TAG_1}, etc.
+            const tagsInRow = row.match(/\{+([^}]+)\}+/g);
+            if (!tagsInRow) continue;
 
-            for (const row of rows) {
-                const textContent = row.replace(/<[^>]+>/g, '');
-                const m = textContent.match(/Q\s*_\s*(\d+)/i);
-                if (m) {
-                    const n = parseInt(m[1]);
-                    if (n > maxExistingN) {
-                        maxExistingN = n;
-                        lastRowWithTag = row;
-                    }
-                    if (n === 1) templateRow = row;
+            const indexedTagsInRow = tagsInRow.filter(t => t.includes('_1'));
+            if (indexedTagsInRow.length === 0) continue;
+
+            // This row is a template for index 1.
+            // A. Find the maximum index already present in the template for these tags
+            let maxExistingN = 1;
+            const prefixList: string[] = [];
+
+            indexedTagsInRow.forEach(tagRef => {
+                const cleanTag = tagRef.replace(/[\{\}]/g, '').trim();
+                const prefix = cleanTag.replace(/_1$/, '');
+                prefixList.push(prefix);
+
+                // Check other rows for the same prefix with higher N
+                const searchRegex = new RegExp(`${prefix}_(\\d+)`, 'g');
+                let rowMatch;
+                while ((rowMatch = searchRegex.exec(xml!)) !== null) {
+                    maxExistingN = Math.max(maxExistingN, parseInt(rowMatch[1]));
                 }
-            }
+            });
 
-            if (maxQ > maxExistingN && templateRow && lastRowWithTag) {
+            // B. Find the maximum index provided in the form data for these prefixes
+            let maxDataN = 0;
+            prefixList.forEach(prefix => {
+                fields.forEach(f => {
+                    const m = f.label.match(new RegExp(`^${prefix}_(\\d+)$`, 'i')) || 
+                              f.id.match(new RegExp(`^${prefix}_(\\d+)$`, 'i'));
+                    if (m) maxDataN = Math.max(maxDataN, parseInt(m[1]));
+                });
+            });
+
+            // C. Duplicate if needed
+            if (maxDataN > maxExistingN) {
                 let additionalRowsXml = "";
-                for (let i = maxExistingN + 1; i <= maxQ; i++) {
-                    let duplicatedRow = templateRow;
-                    duplicatedRow = duplicatedRow.replace(/(_\s*(?:<[^>]*>)*\s*)1/g, `$1${i}`);
+                // We use the row template (index 1) to create new rows
+                for (let i = maxExistingN + 1; i <= maxDataN; i++) {
+                    let duplicatedRow = row;
+                    // Replace _1 with _i in all tags and labels
+                    duplicatedRow = duplicatedRow.replace(/(_\s*(?:<[^>]*>)*\s*)1(?=[^0-9])/g, `$1${i}`);
                     additionalRowsXml += duplicatedRow;
                 }
-                xml = xml.replace(lastRowWithTag, () => lastRowWithTag + additionalRowsXml);
+                
+                // Find the last row that contains the highest existing index for these tags to append after it
+                const lastExistingIndexRegex = new RegExp(`<w:tr(?:>|\\s[^>]*>)(?:(?!<w:tr).)*?${prefixList[0]}_${maxExistingN}.*?<\/w:tr>`, 'gs');
+                const lastRowMatches = xml!.match(lastExistingIndexRegex);
+                const lastRowToAppendAfter = lastRowMatches ? lastRowMatches[lastRowMatches.length - 1] : row;
+
+                modifiedXml = modifiedXml!.replace(lastRowToAppendAfter, lastRowToAppendAfter + additionalRowsXml);
             }
         }
+        xml = modifiedXml;
 
         // 2. Process Underline replacements
         fields.forEach(f => {
-            if (f.type !== 'checkbox' && (f.value || '').trim()) {
+            if (f.type !== 'checkbox') {
                 const escaped = escapeRegExp(f.label);
                 // Improved regex: ensure $1 doesn't capture trailing spaces that we want to discard
                 const regex = new RegExp(`(${escaped}(?:<[^>]+>)*(?::)?)\\s*(?:<[^>]+>)*\\s*_{3,}`, 'gi');
-                xml = xml!.replace(regex, `$1 ${f.value.trim()}`);
+                const newVal = (f.value || '').trim();
+                xml = xml!.replace(regex, (_, p1) => `${p1} ${newVal.replace(/\n/g, '<w:br/>')}`);
             }
         });
 
@@ -150,7 +176,8 @@ export async function getDocxBlob(file: File, fields: FormField[]): Promise<Blob
     const doc = new Docxtemplater(zip, {
         paragraphLoop: true,
         linebreaks: true,
-        delimiters: { start: '{', end: '}' }
+        delimiters: { start: '{', end: '}' },
+        nullGetter() { return ""; }
     });
 
     doc.render(data);

@@ -19,6 +19,7 @@
     "notification:allow-notify",
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",
-    "log:default"
-  ]
+     "log:default",
+     "updater:default"
+   ]
 }

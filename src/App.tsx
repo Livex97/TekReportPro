@@ -1,18 +1,48 @@
-import { useState, useEffect } from 'react';
-import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, ClipboardList, ListCheck, Sun, Moon, Plus, Trash2, Brain, Database, Bell } from 'lucide-react';
-import { open } from '@tauri-apps/plugin-dialog';
-import { readFile } from '@tauri-apps/plugin-fs';
+import { useState, useEffect, useRef } from 'react';
+import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, Sun, Moon, Plus, Trash2, Brain, Database, Bell, RefreshCw, Layout, Save, RotateCcw } from 'lucide-react';
+import * as LucideIcons from 'lucide-react';
+import { open, save, ask, message } from '@tauri-apps/plugin-dialog';
+import { readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 
 import { extractFieldsFromDocx, extractTextFromDocx } from './utils/docxParser';
 import type { FormField } from './utils/docxParser';
 import { autoFillFields, extractTextFromPdf } from './utils/pdfParser';
 import { generateDocx } from './utils/documentGenerator';
-import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS } from './utils/storage';
+import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath, getSavePath, setSavePath, getNextDocNumber, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS, getUpdateSettings, checkForUpdates, installUpdate, type UpdateSettings, DEFAULT_UPDATE_SETTINGS, getSectionDefinitions, setSectionDefinitions, type SectionDefinition, DEFAULT_SECTIONS, exportAllSettings, importAllSettings, resetAllSettings } from './utils/storage';
 import { DEFAULT_SYSTEM_PROMPT } from './utils/ollama';
 import AIExtraction from './AIExtraction';
 import './App.css';
 
 type View = 'home' | 'settings' | 'form' | 'download' | 'ai-extraction';
+
+function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown }: any) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const adjustHeight = () => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = (textareaRef.current.scrollHeight) + 'px';
+    }
+  };
+
+  useEffect(() => {
+    adjustHeight();
+  }, [value]);
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
+      placeholder={placeholder}
+      className={className + " resize-none overflow-hidden scroll-py-0"}
+      rows={1}
+      spellCheck={false}
+    />
+  );
+}
+
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('home');
@@ -24,38 +54,153 @@ function App() {
   const [technicians, setTechniciansList] = useState<string[]>([]);
   const [newTechName, setNewTechName] = useState('');
   const [csvPath, setCsvPathState] = useState('');
+  const [savePath, setSavePathState] = useState('');
   const [customLayout, setCustomLayoutState] = useState<CustomLayout>({});
   const [aiSettings, setAiSettingsState] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
+
+   // Update State
+   const [updateSettings, setUpdateSettingsState] = useState<UpdateSettings>(DEFAULT_UPDATE_SETTINGS);
+   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloaded' | 'error'>('idle');
+   const [latestVersion, setLatestVersion] = useState<string>('');
+   const [currentVersion, setCurrentVersion] = useState<string>('');
+   const [updateBody, setUpdateBody] = useState<string | null>(null);
+   const [updateDate, setUpdateDate] = useState<string | null>(null);
 
   // Form State
   const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [formFields, setFormFields] = useState<FormField[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [deleteConfirming, setDeleteConfirming] = useState<string | null>(null);
+  const [generateSecondDoc, setGenerateSecondDoc] = useState(false);
+  const [isAiSaved, setIsAiSaved] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [sectionDefinitions, setSectionDefinitionsState] = useState<SectionDefinition[]>(DEFAULT_SECTIONS);
+  const [isSectionsSaved, setIsSectionsSaved] = useState(false);
+  const [resetConfirming, setResetConfirming] = useState(false);
+  const actionLock = useRef(false);
+
 
   useEffect(() => {
     loadInitialData();
   }, []);
 
-  const loadInitialData = async () => {
-    const meta = await getAllTemplatesMeta();
-    setTemplateMeta(meta);
-    
-    const savedTheme = await getSetting<'light' | 'dark'>('theme', 'light');
-    console.log('[Theme] Initial load:', savedTheme);
-    setTheme(savedTheme);
-    applyTheme(savedTheme);
+   const loadInitialData = async () => {
+     const meta = await getAllTemplatesMeta();
+     setTemplateMeta(meta);
+     
+     const savedTheme = await getSetting<'light' | 'dark'>('theme', 'light');
+     console.log('[Theme] Initial load:', savedTheme);
+     setTheme(savedTheme);
+     applyTheme(savedTheme);
 
-    const techs = await getTechnicians();
-    setTechniciansList(techs);
+     const techs = await getTechnicians();
+     setTechniciansList(techs);
 
-    const savedCsvPath = await getCsvPath();
-    setCsvPathState(savedCsvPath);
+     const savedCsvPath = await getCsvPath();
+     setCsvPathState(savedCsvPath);
 
-    const savedAiSettings = await getAiSettings();
-    setAiSettingsState(savedAiSettings);
-  };
+     const savedSavePath = await getSavePath();
+     setSavePathState(savedSavePath);
+
+      const savedAiSettings = await getAiSettings();
+      setAiSettingsState(savedAiSettings);
+
+      const updSettings = await getUpdateSettings();
+      setUpdateSettingsState(updSettings);
+
+      const version = await import('./utils/storage').then(m => m.getCurrentVersion());
+      setCurrentVersion(version);
+
+      const { listen } = await import('@tauri-apps/api/event');
+      // 1. Listen for new update available
+      listen('update-available', (event: any) => {
+        setUpdateStatus('available');
+        setLatestVersion(event.payload.version);
+        setUpdateBody(typeof event.payload.body === 'string' ? event.payload.body : null);
+        setUpdateDate(typeof event.payload.date === 'string' ? event.payload.date : null);
+        
+        // Notify user if enabled
+        if (updSettings.enabled) {
+          import('./utils/notifications').then(m => m.sendAppNotification(
+            "Nuovo Aggiornamento", 
+            `Versione ${event.payload.version} disponibile!`
+          ));
+        }
+
+        if (updSettings.enabled && updSettings.autoInstall) {
+          installUpdate();
+        }
+      });
+
+      // 2. Listen for update downloaded
+      listen('update-downloaded', () => {
+        setUpdateStatus('downloaded');
+      });
+
+      // 3. Manual check on startup if enabled
+      if (updSettings.enabled) {
+        checkForUpdates().then(result => {
+           if (result.available) {
+             setUpdateStatus('available');
+             setLatestVersion(result.latestVersion || '');
+             setUpdateBody(result.body || null);
+             setUpdateDate(result.date || null);
+             import('./utils/notifications').then(m => m.sendAppNotification(
+                "Nuovo Aggiornamento", 
+                `Versione ${result.latestVersion} disponibile!`
+              ));
+           }
+        }).catch(err => console.error('[Update] Startup check error:', err));
+      }
+
+      const sections = await getSectionDefinitions();
+      setSectionDefinitionsState(sections);
+    };
+
+  // Task 8: Drag and Drop Listeners
+  useEffect(() => {
+    let unlistenDrop: any = null;
+    let unlistenEnter: any = null;
+    let unlistenLeave: any = null;
+
+    const setupTauriEvents = async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+
+      unlistenEnter = await listen('tauri://drag-enter', () => {
+        if (currentView === 'form') setIsDragging(true);
+      });
+
+      unlistenLeave = await listen('tauri://drag-leave', () => {
+        setIsDragging(false);
+      });
+
+      unlistenDrop = await listen('tauri://drag-drop', async (event: any) => {
+        setIsDragging(false);
+        if (currentView !== 'form') return;
+
+        const paths = event.payload.paths;
+        if (paths && paths.length > 0) {
+          try {
+            const filePath = paths[0];
+            const fileName = filePath.split(/[/\\]/).pop() || 'source';
+            const content = await readFile(filePath);
+            await processSourceFile(fileName, content);
+          } catch (err) {
+            console.error('[App] Drag drop error:', err);
+          }
+        }
+      });
+    };
+
+    setupTauriEvents();
+
+    return () => {
+      if (unlistenDrop) unlistenDrop();
+      if (unlistenEnter) unlistenEnter();
+      if (unlistenLeave) unlistenLeave();
+    };
+  }, [currentView]);
 
 
   const applyTheme = (t: 'light' | 'dark') => {
@@ -138,6 +283,89 @@ function App() {
     }
   };
 
+  // --- Backup & Restore Logic (Task 13 & 14) ---
+  const handleExportSettings = async () => {
+    if (isProcessing || actionLock.current) return;
+    actionLock.current = true;
+    setIsProcessing(true);
+    try {
+      const data = await exportAllSettings();
+      const selected = await save({
+        filters: [{ name: 'Backup Settings', extensions: ['json'] }],
+        defaultPath: 'rapportini_backup.json'
+      });
+
+      if (selected) {
+        await writeTextFile(selected, JSON.stringify(data, null, 2));
+        await message("Impostazioni esportate correttamente!", { title: 'Successo', kind: 'info' });
+      }
+    } catch (err) {
+      console.error("Export error:", err);
+      await message("Errore nell'esportazione delle impostazioni.", { title: 'Errore', kind: 'error' });
+    } finally {
+      setIsProcessing(false);
+      actionLock.current = false;
+    }
+  };
+
+  const handleImportSettings = async () => {
+    if (isProcessing || actionLock.current) return;
+    actionLock.current = true;
+    setIsProcessing(true);
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'Backup Settings', extensions: ['json'] }]
+      });
+
+      if (selected && typeof selected === 'string') {
+        const confirmed = await ask(
+          "L'importazione sovrascriverà tutti i settaggi attuali e i template. Vuoi procedere?",
+          { title: 'Conferma Ripristino', kind: 'warning' }
+        );
+        
+        if (confirmed) {
+          const content = await readFile(selected);
+          const text = new TextDecoder().decode(content);
+          const data = JSON.parse(text);
+
+          await importAllSettings(data);
+          await message("Impostazioni ripristinate con successo! L'applicazione verrà ricaricata.", { title: 'Successo', kind: 'info' });
+          window.location.reload();
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Import error:", err);
+      await message("Errore nell'importazione delle impostazioni. Verifica il file.", { title: 'Errore', kind: 'error' });
+    } finally {
+      setIsProcessing(false);
+      actionLock.current = false;
+    }
+  };
+
+  const handleResetSettings = async () => {
+    if (isProcessing || actionLock.current) return;
+    if (!resetConfirming) {
+      setResetConfirming(true);
+      setTimeout(() => setResetConfirming(false), 3000);
+      return;
+    }
+
+    actionLock.current = true;
+    setIsProcessing(true);
+    try {
+      await resetAllSettings();
+      await message("Impostazioni ripristinate ai valori predefiniti.", { title: 'Successo', kind: 'info' });
+      window.location.reload();
+    } catch (err) {
+      console.error("Reset error:", err);
+      await message("Errore durante il reset.", { title: 'Errore', kind: 'error' });
+      setIsProcessing(false);
+      actionLock.current = false;
+    }
+  };
+
   // --- Home Logic ---
   const handleSelectTemplate = async (slotId: string) => {
     setIsProcessing(true);
@@ -149,6 +377,7 @@ function App() {
       }
       setTemplateFile(file);
       setActiveSlotId(slotId);
+      setGenerateSecondDoc(false);
 
       // Extract fields and load specific layout
       const [fields, layout] = await Promise.all([
@@ -156,8 +385,22 @@ function App() {
         getCustomLayout(slotId)
       ]);
       
-      setFormFields(fields);
       setCustomLayoutState(layout);
+
+      // Task 4: Auto-fill N_DOC if savePath is set
+      const nextNum = await getNextDocNumber(savePath);
+      if (nextNum) {
+        setFormFields(fields.map(f => {
+          const labelUc = f.label.toUpperCase();
+          if (labelUc.includes('N_DOC') || labelUc.includes('N.DOC') || labelUc.includes('NUMERO DOCUMENTO')) {
+             return { ...f, value: nextNum };
+          }
+          return f;
+        }));
+      } else {
+        setFormFields(fields);
+      }
+
       setCurrentView('form');
     } catch (err) {
       console.error("Error loading template for form", err);
@@ -167,7 +410,81 @@ function App() {
     }
   };
 
-  // --- Form Logic ---
+  const processSourceFile = async (fileName: string, content: Uint8Array) => {
+    setIsProcessing(true);
+    try {
+      console.log('[App] Processing source file:', fileName);
+      const isPdf = fileName.toLowerCase().endsWith('.pdf');
+      const isDocx = fileName.toLowerCase().endsWith('.docx');
+      
+      if (!isPdf && !isDocx) {
+        alert("Formato non supportato. Trascina un file PDF o DOCX.");
+        return;
+      }
+
+      const mimeType = isPdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      
+      let extractedData: any = '';
+      if (isPdf) {
+        extractedData = await extractTextFromPdf(content);
+      } else if (isDocx) {
+        const file = new File([content as any], fileName, { type: mimeType });
+        extractedData = await extractTextFromDocx(file);
+      }
+
+      if (extractedData) {
+        console.log('[App] Data extracted, auto-filling...');
+        const updatedFields = autoFillFields(formFields, extractedData);
+        setFormFields(updatedFields);
+      }
+    } catch (err) {
+      console.error("[App] Error processing source file:", err);
+      alert("Errore nell'estrazione del testo dalla sorgente.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAddRow = (sectionId: string) => {
+    // 1. Get all fields in this section
+    const sectionFields = formFields.filter(f => getFieldSection(f) === sectionId);
+    
+    // 2. Identify indexed fields (ending in _N or N)
+    // We check both label and ID
+    const indexedFields = sectionFields.filter(f => /_(\d+)$/.test(f.label) || /_(\d+)$/.test(f.id));
+    if (indexedFields.length === 0) return;
+
+    // 3. Find max index N
+    let maxN = 0;
+    indexedFields.forEach(f => {
+      const matchLabel = f.label.match(/_(\d+)$/);
+      const matchId = f.id.match(/_(\d+)$/);
+      if (matchLabel) maxN = Math.max(maxN, parseInt(matchLabel[1], 10));
+      if (matchId) maxN = Math.max(maxN, parseInt(matchId[1], 10));
+    });
+
+    if (maxN === 0) return;
+
+    // 4. Find fields with index 1 (as templates for the new row)
+    const fieldsIndex1 = indexedFields.filter(f => f.label.endsWith('_1') || f.id.endsWith('_1'));
+    if (fieldsIndex1.length === 0) return;
+
+    // 5. Create new fields for maxN + 1
+    const nextN = maxN + 1;
+    const newFields: FormField[] = fieldsIndex1.map(f => {
+      const newLabel = f.label.replace(/_1$/, `_${nextN}`);
+      const newId = f.id.replace(/_1$/, `_${nextN}`);
+      return {
+        ...f,
+        id: newId,
+        label: newLabel,
+        value: ''
+      };
+    });
+
+    setFormFields([...formFields, ...newFields]);
+  };
+
   const handleSourceUpload = async () => {
     try {
       const selected = await open({
@@ -179,36 +496,12 @@ function App() {
       });
 
       if (selected && typeof selected === 'string') {
-        setIsProcessing(true);
-        console.log('[App] Loading source file:', selected);
-        
         const fileName = selected.split(/[/\\]/).pop() || 'source';
         const content = await readFile(selected);
-        
-        const isPdf = fileName.toLowerCase().endsWith('.pdf');
-        const mimeType = isPdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-        
-        let extractedData: any = '';
-        if (isPdf) {
-          console.log('[App] Calling extractTextFromPdf...');
-          extractedData = await extractTextFromPdf(content);
-        } else if (fileName.toLowerCase().endsWith('.docx')) {
-          console.log('[App] Calling extractTextFromDocx...');
-          const file = new File([content], fileName, { type: mimeType });
-          extractedData = await extractTextFromDocx(file);
-        }
-
-        if (extractedData) {
-          console.log('[App] Data extracted, auto-filling...');
-          const updatedFields = autoFillFields(formFields, extractedData);
-          setFormFields(updatedFields);
-        }
+        await processSourceFile(fileName, content);
       }
     } catch (err) {
-      console.error("[App] Error extracting text from source:", err);
-      alert("Errore nell'estrazione del testo dalla sorgente.");
-    } finally {
-      setIsProcessing(false);
+      console.error("[App] Error picking source file:", err);
     }
   };
 
@@ -223,7 +516,54 @@ function App() {
 
   const handleDownloadDocx = async () => {
     if (!templateFile) return;
-    await generateDocx(templateFile, formFields);
+
+    // Find N_DOC field (case insensitive)
+    const nDocField = formFields.find(f => 
+      f.label.toUpperCase() === 'N_DOC' || 
+      f.id.toUpperCase() === 'N_DOC' ||
+      f.label.toUpperCase() === 'N.DOC' ||
+      f.id.toUpperCase() === 'N.DOC' ||
+      f.label.toUpperCase() === 'NUMERO DOCUMENTO'
+    );
+
+    let baseName = '';
+    let outputName = 'rapportino.docx';
+    if (nDocField && nDocField.value.trim()) {
+      baseName = nDocField.value.trim();
+      outputName = `${baseName}_.docx`;
+    }
+
+    // Generate First Document
+    await generateDocx(templateFile, formFields, outputName);
+
+    // Task 6: Generate Second Document if requested
+    const isInstallation = templateFile.name.toLowerCase().includes('installazione') && templateFile.name.toLowerCase().includes('collaudo');
+    if (generateSecondDoc && isInstallation) {
+      console.log('[App] Generating second document (Formazione del Personale)...');
+      
+      // Find the template by name in existing slots
+      const secondTemplateMeta = templateMeta.find(m => 
+        m?.name.toLowerCase().includes('formazione') && 
+        m?.name.toLowerCase().includes('personale')
+      );
+
+      if (secondTemplateMeta) {
+        try {
+          const secondTemplateFile = await getTemplateFile(secondTemplateMeta.id);
+          if (secondTemplateFile) {
+            const secondOutputName = baseName ? `${baseName}P_.docx` : 'formazione_personale.docx';
+            // Small delay to prevent issues with multiple dialogs if they happen too fast
+            await new Promise(r => setTimeout(r, 500));
+            await generateDocx(secondTemplateFile, formFields, secondOutputName);
+          }
+        } catch (err) {
+          console.error('[App] Error generating second doc:', err);
+          alert('Errore nella generazione del secondo documento.');
+        }
+      } else {
+        alert('Attenzione: Template "Formazione del Personale" non trovato negli slot. Caricalo per poter generare il secondo file.');
+      }
+    }
   };
 
   // Sorting logic for form fields
@@ -340,7 +680,21 @@ function App() {
     };
 
   return (
-    <div className="min-h-screen flex flex-col bg-neutral-50 dark:bg-neutral-900 transition-colors duration-300">
+    <div className="min-h-screen flex flex-col bg-neutral-50 dark:bg-neutral-900 transition-colors duration-300 relative">
+      {/* Task 8: Drag and Drop Overlay */}
+      {isDragging && currentView === 'form' && (
+        <div 
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-12 bg-black/40 backdrop-blur-sm pointer-events-none"
+        >
+          <div 
+            className="w-full h-full border-4 border-dashed border-primary-500 rounded-3xl flex flex-col items-center justify-center bg-white dark:bg-neutral-900 shadow-2xl animate-in zoom-in-95 duration-200"
+          >
+            <Upload className="w-20 h-20 text-primary-500 mb-4 animate-bounce" />
+            <h3 className="text-3xl font-black text-neutral-900 dark:text-white mb-2 text-center px-4">Rilascia il file sorgente</h3>
+            <p className="text-xl text-neutral-600 dark:text-neutral-400 text-center px-4">PDF o DOCX verranno usati per l'auto-compilazione del template</p>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <header className="bg-white dark:bg-neutral-800 border-b border-neutral-200 dark:border-neutral-700 sticky top-0 z-10 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -603,6 +957,39 @@ function App() {
               </div>
             </div>
 
+            {/* Default Save Path Settings */}
+            <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+              <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
+                <Download className="w-6 h-6 text-primary-600" />
+                Percorso di Salvataggio Predefinito
+              </h3>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Seleziona la cartella in cui verranno salvati i documenti generati. Verrà utilizzata anche per calcolare il prossimo numero di documento.</p>
+              
+              <div className="flex gap-3 items-center">
+                <input
+                  type="text"
+                  readOnly
+                  value={savePath || 'Nessuna cartella selezionata...'}
+                  className="flex-1 px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
+                />
+                <button
+                  onClick={async () => {
+                    const selected = await open({
+                        directory: true,
+                        multiple: false,
+                    });
+                    if (selected && typeof selected === 'string') {
+                        setSavePathState(selected);
+                        await setSavePath(selected);
+                    }
+                  }}
+                  className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors"
+                >
+                  Sfoglia Cartella
+                </button>
+              </div>
+            </div>
+
             {/* AI Settings */}
             <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
               <div className="flex items-center justify-between mb-4">
@@ -615,11 +1002,25 @@ function App() {
                     setIsProcessing(true);
                     await setAiSettings(aiSettings);
                     setIsProcessing(false);
+                    setIsAiSaved(true);
+                    setTimeout(() => setIsAiSaved(false), 3000);
                   }}
-                  className="px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 text-sm shadow-sm shadow-primary-500/20"
+                  className={`px-4 py-2 font-bold rounded-lg transition-all duration-300 flex items-center gap-2 text-sm shadow-sm 
+                    ${isAiSaved 
+                      ? 'bg-emerald-600 text-white shadow-emerald-500/20' 
+                      : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/20'}`}
                 >
-                  <CheckCircle className="w-4 h-4" />
-                  Salva Impostazioni AI
+                  {isAiSaved ? (
+                    <>
+                      <CheckCircle className="w-4 h-4" />
+                      Impostazioni Salvate!
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4 shadow-sm" />
+                      Salva Impostazioni AI
+                    </>
+                  )}
                 </button>
               </div>
               <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Configura i parametri per la connessione a Ollama e il comportamento del modello AI.</p>
@@ -755,6 +1156,377 @@ function App() {
             </div>
 
 
+            {/* Section Definitions Management */}
+            <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <Layout className="w-6 h-6 text-primary-600" />
+                  Personalizzazione Sezioni
+                </h3>
+                <button
+                  onClick={async () => {
+                    setIsProcessing(true);
+                    await setSectionDefinitions(sectionDefinitions);
+                    setIsProcessing(false);
+                    setIsSectionsSaved(true);
+                    setTimeout(() => setIsSectionsSaved(false), 3000);
+                  }}
+                  className={`px-4 py-2 font-bold rounded-lg transition-all duration-300 flex items-center gap-2 text-sm shadow-sm 
+                    ${isSectionsSaved 
+                      ? 'bg-emerald-600 text-white shadow-emerald-500/20' 
+                      : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/20'}`}
+                >
+                  {isSectionsSaved ? (
+                    <>
+                      <CheckCircle className="w-4 h-4" />
+                      Sezioni Salvate!
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4 shadow-sm" />
+                      Salva Sezioni
+                    </>
+                  )}
+                </button>
+              </div>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Personalizza le sezioni appariranno nei template relativi ai Rapportini. Puoi cambiare i nomi e le icone (usa i nomi delle icone Lucide).</p>
+              
+              <div className="space-y-4">
+                {sectionDefinitions.map((sec, idx) => {
+                  const Icon = (LucideIcons as any)[sec.icon] || LucideIcons.HelpCircle;
+                  return (
+                    <div key={sec.id} className="flex flex-col sm:flex-row gap-4 p-4 bg-neutral-50 dark:bg-neutral-700/50 rounded-xl border border-neutral-100 dark:border-neutral-700">
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-600">
+                          <Icon className="w-5 h-5 text-primary-600" />
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <div className="flex gap-2">
+                             <div className="flex-1">
+                               <label className="block text-[10px] uppercase font-black text-neutral-400 mb-1">Titolo Sezione</label>
+                               <input 
+                                 type="text" 
+                                 value={sec.title}
+                                 onChange={(e) => {
+                                   const next = [...sectionDefinitions];
+                                   next[idx].title = e.target.value;
+                                   setSectionDefinitionsState(next);
+                                 }}
+                                 className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-1.5 text-sm dark:text-white"
+                               />
+                             </div>
+                             <div className="w-32">
+                               <label className="block text-[10px] uppercase font-black text-neutral-400 mb-1">Icona Lucide</label>
+                               <input 
+                                 type="text" 
+                                 value={sec.icon}
+                                 onChange={(e) => {
+                                   const next = [...sectionDefinitions];
+                                   next[idx].icon = e.target.value;
+                                   setSectionDefinitionsState(next);
+                                 }}
+                                 placeholder="User, Package..."
+                                 className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-1.5 text-sm dark:text-white"
+                               />
+                             </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 self-end sm:self-center">
+                        <button 
+                          onClick={() => {
+                            if (idx === 0) return;
+                            const next = [...sectionDefinitions];
+                            [next[idx-1], next[idx]] = [next[idx], next[idx-1]];
+                            setSectionDefinitionsState(next);
+                          }}
+                          className="p-2 text-neutral-400 hover:text-primary-600"
+                        >
+                          <ChevronUp className="w-5 h-5" />
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if (idx === sectionDefinitions.length - 1) return;
+                            const next = [...sectionDefinitions];
+                            [next[idx], next[idx+1]] = [next[idx+1], next[idx]];
+                            setSectionDefinitionsState(next);
+                          }}
+                          className="p-2 text-neutral-400 hover:text-primary-600"
+                        >
+                          <ChevronDown className="w-5 h-5" />
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setSectionDefinitionsState(sectionDefinitions.filter((_, i) => i !== idx));
+                          }}
+                          className="p-2 text-neutral-400 hover:text-red-500"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => {
+                  const newId = `custom_${Date.now()}`;
+                  setSectionDefinitionsState([...sectionDefinitions, { id: newId, title: 'Nuova Sezione', icon: 'Type' }]);
+                }}
+                className="mt-6 w-full py-3 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-xl text-neutral-500 hover:border-primary-500 hover:text-primary-500 transition-all font-bold flex items-center justify-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Aggiungi Nuova Sezione
+              </button>
+            </div>
+
+
+            {/* Update Settings */}
+            <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <RefreshCw className="w-6 h-6 text-primary-600" />
+                  Aggiornamenti Applicazione
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      setUpdateStatus('checking');
+                      const result = await import('./utils/storage').then(m => m.checkForUpdates());
+                      if (result.available) {
+                        setUpdateStatus('available');
+                        setLatestVersion(result.latestVersion || '');
+                        setUpdateBody(result.body || null);
+                        setUpdateDate(result.date || null);
+                      } else {
+                        setUpdateStatus('idle');
+                      }
+                    }}
+                    disabled={updateStatus === 'checking' || isProcessing}
+                    className="px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 text-sm disabled:opacity-50"
+                  >
+                    {updateStatus === 'checking' ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Verifica...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4" />
+                        Controlla Aggiornamenti
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Verifica la disponibilità di nuove versioni dell'applicazione e installa gli aggiornamenti automaticamente.</p>
+
+              <div className="space-y-6">
+                {/* Current Version Display */}
+                <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                      <Package className="w-5 h-5 text-primary-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Versione Corrente</h4>
+                      <p className="text-xs text-neutral-500">{currentVersion || 'Caricamento...'}</p>
+                    </div>
+                  </div>
+                  {latestVersion && (
+                    <div className="text-right">
+                      <p className="text-xs font-bold text-primary-600">Nuova: {latestVersion}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Update Status & Actions */}
+                {updateStatus === 'available' && (
+                  <div className="p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-xl">
+                    <div className="flex items-start gap-3 mb-3">
+                      <div className="w-8 h-8 bg-primary-100 dark:bg-primary-900/50 rounded-full flex items-center justify-center shrink-0">
+                        <Download className="w-4 h-4 text-primary-600" />
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="text-sm font-bold text-primary-800 dark:text-primary-400 mb-1">Aggiornamento Disponibile!</h4>
+                        {updateBody && (
+                          <p className="text-xs text-primary-700 dark:text-primary-500 mb-2">{updateBody}</p>
+                        )}
+                        {updateDate && (
+                          <p className="text-[10px] text-primary-600/70 dark:text-primary-500/70">
+                            Pubblicato: {new Date(updateDate).toLocaleDateString('it-IT')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        setIsProcessing(true);
+                        try {
+                          await import('./utils/storage').then(m => m.installUpdate());
+                          setUpdateStatus('downloaded');
+                        } catch (e) {
+                          console.error('Install error:', e);
+                          setUpdateStatus('error');
+                        } finally {
+                          setIsProcessing(false);
+                        }
+                      }}
+                      disabled={isProcessing}
+                      className="w-full px-4 py-3 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-2"
+                    >
+                      {isProcessing && updateStatus === 'available' ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Installazione...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          Scarica e Installa Aggiornamento
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {updateStatus === 'downloaded' && (
+                  <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-green-100 dark:bg-green-900/50 rounded-full flex items-center justify-center shrink-0">
+                        <CheckCircle className="w-4 h-4 text-green-600" />
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="text-sm font-bold text-green-800 dark:text-green-400">Aggiornamento Pronto</h4>
+                        <p className="text-xs text-green-700 dark:text-green-500">L'aggiornamento è stato scaricato e verrà installato al prossimo riavvio dell'app.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {updateStatus === 'error' && (
+                  <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-red-100 dark:bg-red-900/50 rounded-full flex items-center justify-center shrink-0">
+                        <span className="text-red-600 text-xs">!</span>
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="text-sm font-bold text-red-800 dark:text-red-400">Errore Aggiornamento</h4>
+                        <p className="text-xs text-red-700 dark:text-red-500">Impossibile verificare o installare gli aggiornamenti. Riprova più tardi.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Settings Toggles */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                        <RefreshCw className={`w-5 h-5 ${updateSettings.enabled ? 'text-primary-600' : 'text-neutral-400'}`} />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Controllo Automatico</h4>
+                        <p className="text-xs text-neutral-500">Verifica aggiornamenti all'avvio</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const newValue = !updateSettings.enabled;
+                        await setUpdateSettingsState({ ...updateSettings, enabled: newValue });
+                        await import('./utils/storage').then(m => m.setUpdateSettings({ ...updateSettings, enabled: newValue }));
+                      }}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500
+                        ${updateSettings.enabled ? 'bg-primary-600' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                          ${updateSettings.enabled ? 'translate-x-6' : 'translate-x-1'}`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                        <Download className={`w-5 h-5 ${updateSettings.autoInstall ? 'text-primary-600' : 'text-neutral-400'}`} />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Installazione Automatica</h4>
+                        <p className="text-xs text-neutral-500">Installa automaticamente</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const newValue = !updateSettings.autoInstall;
+                        await setUpdateSettingsState({ ...updateSettings, autoInstall: newValue });
+                        await import('./utils/storage').then(m => m.setUpdateSettings({ ...updateSettings, autoInstall: newValue }));
+                      }}
+                      disabled={!updateSettings.enabled}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500 disabled:opacity-50
+                        ${updateSettings.autoInstall ? 'bg-primary-600' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                          ${updateSettings.autoInstall ? 'translate-x-6' : 'translate-x-1'}`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Backup & Restore Settings (Task 13 & 14) */}
+            <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+              <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
+                <Save className="w-6 h-6 text-primary-600" />
+                Backup & Ripristino
+              </h3>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Salva o ripristina tutte le impostazioni dell'applicazione (tecnici, percorsi, configurazioni IA e template).</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                <button
+                  onClick={handleExportSettings}
+                  disabled={isProcessing}
+                  className="flex items-center justify-center gap-3 p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-xl text-primary-700 dark:text-primary-400 hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors font-bold disabled:opacity-50"
+                >
+                  <Download className="w-5 h-5" />
+                  Esporta Tutto (JSON)
+                </button>
+                <button
+                  onClick={handleImportSettings}
+                  disabled={isProcessing}
+                  className="flex items-center justify-center gap-3 p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors font-bold shadow-sm disabled:opacity-50"
+                >
+                  <Upload className="w-5 h-5" />
+                  Importa Backup
+                </button>
+              </div>
+
+              <div className="pt-6 border-t border-neutral-100 dark:border-neutral-700">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-sm font-bold text-red-600 flex items-center gap-2">
+                      <RotateCcw className="w-4 h-4" />
+                      Reset alle impostazioni di fabbrica
+                    </h4>
+                    <p className="text-xs text-neutral-500">Elimina tutti i settaggi e i template caricati.</p>
+                  </div>
+                  <button
+                    onClick={handleResetSettings}
+                    disabled={isProcessing}
+                    className={`px-6 py-2 text-sm font-bold rounded-lg transition-all disabled:opacity-50
+                      ${resetConfirming 
+                        ? 'bg-red-600 text-white animate-pulse' 
+                        : 'bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400'}`}
+                  >
+                    {resetConfirming ? 'Sei sicuro? Clicca di nuovo' : 'Esegui Reset'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {isProcessing && <div className="mt-4 text-center text-primary-600 font-semibold animate-pulse">Salvataggio in corso...</div>}
 
           </div>
@@ -799,6 +1571,31 @@ function App() {
 
             <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-10">
 
+              {/* Task 6: Option for second document (Formazione del Personale) */}
+              {templateFile?.name.toLowerCase().includes('installazione') && templateFile?.name.toLowerCase().includes('collaudo') && (
+                <div className="mb-8 p-6 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-2xl flex items-center justify-between shadow-sm">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white dark:bg-neutral-800 rounded-xl border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                      <FileUp className="w-6 h-6 text-primary-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-bold text-neutral-900 dark:text-white">Genera anche "Formazione del Personale"</h4>
+                      <p className="text-sm text-neutral-500 dark:text-neutral-400">Crea automaticamente un secondo file con gli stessi dati e suffisso "P".</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setGenerateSecondDoc(!generateSecondDoc)}
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500
+                      ${generateSecondDoc ? 'bg-primary-600' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform
+                        ${generateSecondDoc ? 'translate-x-6' : 'translate-x-1'}`}
+                    />
+                  </button>
+                </div>
+              )}
+
               {/* Macro Sections Rendering */}
               {(() => {
                 const textFields = sortTextFields(formFields.filter(f => f.type !== 'checkbox'));
@@ -806,18 +1603,8 @@ function App() {
 
                 if (formFields.length === 0) return null;
 
-                // 2. Define sections
-                const sectionDefinitions = [
-                  { id: 'client', title: 'Dati Cliente e Destinazione', icon: <User className="w-5 h-5 text-blue-500" /> },
-                  { id: 'refs', title: 'Riferimenti Documento', icon: <ClipboardList className="w-5 h-5 text-purple-500" /> },
-                  { id: 'items', title: 'Articoli e Materiali', icon: <Package className="w-5 h-5 text-amber-500" /> },
-                  { id: 'checks', title: 'Configurazioni e Opzioni', icon: <ListCheck className="w-5 h-5 text-emerald-500" /> },
-                  { id: 'staff', title: 'Personale e Firme', icon: <User className="w-5 h-5 text-indigo-500" /> },
-                  { id: 'other', title: 'Altri Campi', icon: <div className="w-5 h-5 bg-neutral-100 dark:bg-neutral-700 rounded text-[10px] flex items-center justify-center font-bold">...</div> }
-                ];
-
-                // 3. Populate sections with fields
                 const sections = sectionDefinitions.map(def => {
+                  const Icon = (LucideIcons as any)[def.icon] || LucideIcons.HelpCircle;
                   let fields: FormField[] = [];
                   if (def.id === 'checks') {
                     fields = checkFields;
@@ -830,7 +1617,7 @@ function App() {
                       return orderA - orderB;
                     });
                   }
-                  return { ...def, fields };
+                  return { ...def, iconElement: <Icon className="w-5 h-5 text-primary-600" />, fields };
                 }).filter(s => s.fields.length > 0);
 
                 return sections.map((section) => {
@@ -844,11 +1631,12 @@ function App() {
                     >
                       <button
                         onClick={toggle}
+                        tabIndex={-1}
                         className={`w-full flex items-center justify-between p-5 bg-neutral-50/50 dark:bg-neutral-700/30 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors ${isCollapsed ? 'rounded-2xl' : 'rounded-t-2xl'}`}
                       >
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-white dark:bg-neutral-700 rounded-lg border border-neutral-100 dark:border-neutral-600 flex items-center justify-center shadow-sm">
-                            {section.icon}
+                            {section.iconElement}
                           </div>
                           <h3 className="text-lg font-bold text-neutral-800 dark:text-neutral-100">{section.title}</h3>
                           <span className="text-xs font-bold bg-neutral-200 dark:bg-neutral-600 text-neutral-600 dark:text-neutral-300 px-2 py-0.5 rounded-full">
@@ -878,6 +1666,7 @@ function App() {
                                           <div className="flex bg-white dark:bg-neutral-800 rounded-md border border-neutral-200 dark:border-neutral-600 shadow-sm overflow-hidden">
                                             <button
                                               onClick={() => moveField(field.id, 'up')}
+                                              tabIndex={-1}
                                               className="p-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700 text-neutral-500 hover:text-primary-600"
                                               title="Sposta su"
                                             >
@@ -886,6 +1675,7 @@ function App() {
                                             <div className="w-[1px] bg-neutral-100 dark:bg-neutral-700" />
                                             <button
                                               onClick={() => moveField(field.id, 'down')}
+                                              tabIndex={-1}
                                               className="p-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700 text-neutral-500 hover:text-primary-600"
                                               title="Sposta giù"
                                             >
@@ -895,21 +1685,27 @@ function App() {
 
                                           {/* Move to Section Dropdown */}
                                           <div className="relative group/move">
-                                            <button className="p-1.5 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-600 rounded-md shadow-sm text-neutral-500 hover:text-primary-600 hover:border-primary-200">
+                                            <button 
+                                              tabIndex={-1}
+                                              className="p-1.5 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-600 rounded-md shadow-sm text-neutral-500 hover:text-primary-600 hover:border-primary-200"
+                                            >
                                               <ArrowLeft className="w-3.5 h-3.5 rotate-180" />
                                             </button>
                                             <div className="absolute right-0 top-full mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl z-50 py-2 hidden group-hover/move:block min-w-[180px] animate-in fade-in zoom-in-95 duration-200">
                                               <p className="px-4 py-1.5 text-[10px] font-black text-neutral-400 uppercase tracking-widest border-b border-neutral-50 dark:border-neutral-700 mb-1">Sposta in Sezione:</p>
-                                              {sectionDefinitions.filter(d => d.id !== section.id).map(d => (
-                                                <button
-                                                  key={d.id}
-                                                  onClick={() => handleSectionChange(field.id, d.id)}
-                                                  className="w-full text-left px-4 py-2 text-xs hover:bg-primary-50 dark:hover:bg-primary-900/20 text-neutral-700 dark:text-neutral-200 flex items-center gap-3 transition-colors"
-                                                >
-                                                  <span className="shrink-0">{d.icon}</span>
-                                                  <span className="font-semibold">{d.title}</span>
-                                                </button>
-                                              ))}
+                                              {sectionDefinitions.filter(d => d.id !== section.id).map(d => {
+                                                const Icon = (LucideIcons as any)[d.icon] || LucideIcons.HelpCircle;
+                                                return (
+                                                  <button
+                                                    key={d.id}
+                                                    onClick={() => handleSectionChange(field.id, d.id)}
+                                                    className="w-full text-left px-4 py-2 text-xs hover:bg-primary-50 dark:hover:bg-primary-900/20 text-neutral-700 dark:text-neutral-200 flex items-center gap-3 transition-colors"
+                                                  >
+                                                    <span className="shrink-0"><Icon className="w-4 h-4" /></span>
+                                                    <span className="font-semibold">{d.title}</span>
+                                                  </button>
+                                                );
+                                              })}
                                             </div>
                                           </div>
                                         </div>
@@ -930,14 +1726,14 @@ function App() {
                                           </datalist>
                                         </div>
                                       ) : (
-                                        <input
-                                          type="text"
+                                        <AutoResizeTextarea
                                           value={field.value}
-                                          onChange={(e) => handleFieldChange(field.id, e.target.value)}
+                                          onChange={(v: string) => handleFieldChange(field.id, v)}
                                           className="w-full bg-transparent border-none outline-none focus:ring-0 p-0 text-neutral-900 dark:text-white font-semibold text-base"
                                           placeholder="Inserisci un valore..."
                                         />
                                       )}
+
                                     </div>
                                   </div>
                                 );
@@ -986,6 +1782,25 @@ function App() {
                               })()}
                             </div>
                           )}
+                          
+                          {(() => {
+                            const hasIndexedFields = section.fields.some(f => f.type !== 'checkbox' && (/_(\d+)$/.test(f.label) || /_(\d+)$/.test(f.id)));
+                            if (hasIndexedFields) {
+                              return (
+                                <div className="mt-8 pt-6 border-t border-neutral-100 dark:border-neutral-700/50 flex justify-center sticky bottom-2">
+                                  <button
+                                    onClick={() => handleAddRow(section.id)}
+                                    tabIndex={-1}
+                                    className="flex items-center gap-2 px-6 py-3 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 hover:bg-primary-600 dark:hover:bg-primary-500 hover:text-white dark:hover:text-white rounded-xl shadow-lg shadow-neutral-500/10 dark:shadow-none transition-all font-bold text-sm group"
+                                  >
+                                    <Plus className="w-5 h-5 group-hover:scale-125 transition-transform" />
+                                    Aggiungi Riga / Elemento
+                                  </button>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       )}
                     </div>
@@ -1025,6 +1840,13 @@ function App() {
             </p>
 
             <div className="flex flex-col sm:flex-row justify-center gap-4">
+              <button
+                onClick={() => setCurrentView('form')}
+                className="px-8 py-4 bg-white dark:bg-neutral-800 border-2 border-primary-100 dark:border-neutral-700 rounded-xl text-neutral-600 dark:text-neutral-300 text-lg font-bold hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors shadow-sm flex items-center justify-center gap-2 group w-full sm:w-auto"
+              >
+                <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+                Torna al Modulo
+              </button>
               <button
                 onClick={handleDownloadDocx}
                 className="px-8 py-4 bg-primary-600 rounded-xl text-white text-lg font-bold hover:bg-primary-700 transition-colors shadow-lg shadow-primary-500/30 flex items-center justify-center gap-2 group w-full sm:w-auto"

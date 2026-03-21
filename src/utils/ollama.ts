@@ -28,7 +28,31 @@ CAMPI:
 - "ubicazione": Luogo fisico (l'ospedale, la sede lavorativa o il reparto dell'intervento).
 - "strumentoDaRiparare": Che cosa si deve riparare? Specifica Nome, marca e modello, includendo il Serial Number / SN numerico se trovalo.
 - "tipoDiAttivitaGuasto": Sintesi concisa del guasto, dell'errore, o dell'attività che bisogna fare.
-- "tecnico": Il nome del tecnico assegnato, altrimenti stringa vuota.`;
+- "tecnico": Il nome del tecnico assegnato, altrimenti stringa vuota.
+
+ESEMPIO 1 (EMAIL):
+Input: "Da: mario.rossi@asl.it, Oggetto: Guasto frigo reparto chirurgia, Testo: Si richiede intervento urgente per frigo farmaci rotto."
+Output: {
+  "richiestaIntervento": "EMAIL",
+  "data": "14 03 2026",
+  "cliente": "ASL IT",
+  "ubicazione": "REPARTO CHIRURGIA",
+  "strumentoDaRiparare": "FRIGO FARMACI",
+  "tipoDiAttivitaGuasto": "GUASTO FRIGO - RICHIESTA INTERVENTO URGENTE",
+  "tecnico": ""
+}
+
+ESEMPIO 2 (PDF):
+Input: “ODL n. 2025/00998 | Data: 10/01/25 | Cliente: Ospedale San Raffaele | Strumento: Monitor Multiparametrico Philips SN:PH9982"
+Output: {
+  "richiestaIntervento": "2025/00998",
+  "data": "10 01 2025",
+  "cliente": "OSPEDALE SAN RAFFAELE",
+  "ubicazione": "NON SPECIFICATA",
+  "strumentoDaRiparare": "MONITOR MULTIPARAMETRICO PHILIPS SN:PH9982",
+  "tipoDiAttivitaGuasto": "RIPARAZIONE STRUMENTO",
+  "tecnico": ""
+}`;
 
 export async function generateOllamaExtraction(text: string, signal?: AbortSignal): Promise<ExtractedData> {
   const settings = await getAiSettings();

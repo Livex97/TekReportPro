@@ -31,11 +31,42 @@ if (typeof window !== 'undefined') {
 }
 
 
+export type DocumentType = 'DDT' | 'Fattura' | 'Documento Tecnico' | 'Generico';
+export const DocumentTypes = {
+    DDT: 'DDT' as DocumentType,
+    FATTURA: 'Fattura' as DocumentType,
+    TECNICO: 'Documento Tecnico' as DocumentType,
+    GENERIC: 'Generico' as DocumentType
+};
+
+
 export interface PdfExtractionResult {
     fullText: string;
+    type: DocumentType;
     pages: {
         lines: { y: number; items: { str: string; x: number }[] }[];
     }[];
+}
+
+export function detectDocumentType(fullText: string): DocumentType {
+    const text = fullText.toUpperCase();
+    
+    // Fattura keywords (based on FATTURA N.207.PDF example context)
+    if (text.includes('FATTURA') || text.includes('IMPONIBILE') || (text.includes('IVA') && text.includes('SCADENZA'))) {
+        return DocumentTypes.FATTURA;
+    }
+    
+    // DDT keywords (current logic)
+    if (text.includes('DDT') || text.includes('DOCUMENTO DI TRASPORTO') || text.includes('VETTORE') || text.includes('NUMERO COLLI')) {
+        return DocumentTypes.DDT;
+    }
+    
+    // Tecnico keywords (Technical Document)
+    if (text.includes('COLLAUDO') || text.includes('CERTIFICATO') || text.includes('TECHNICAL') || text.includes('PROTOCOLLO')) {
+        return DocumentTypes.TECNICO;
+    }
+    
+    return DocumentTypes.GENERIC;
 }
 
 /**
@@ -149,7 +180,10 @@ export async function extractTextFromPdf(data: Uint8Array | ArrayBuffer | File):
         }
 
         console.log('[PDF Parser] Finished raw text extraction. Total characters:', fullText.length);
-        return { fullText, pages };
+        const type = detectDocumentType(fullText);
+        console.log('[PDF Parser] Detected document type:', type);
+
+        return { fullText, type, pages };
     } catch (error) {
         console.error('[PDF Parser] Error during PDF document loading:', error);
         throw error;
@@ -157,10 +191,11 @@ export async function extractTextFromPdf(data: Uint8Array | ArrayBuffer | File):
 }
 
 /**
- * Extracts specific structures known from DDT documents using spatial coordinates.
+ * General purpose spatial extraction for different document types.
  */
-function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
-    console.log('[PDF Parser] Starting extractDdtFields logic...');
+function extractStructuredFields(result: PdfExtractionResult): Record<string, string> {
+    const type = result.type;
+    console.log(`[PDF Parser] Starting structured extraction for type: ${type}...`);
     const extractions: Record<string, string> = {};
     if (!result.pages.length) {
         console.warn('[PDF Parser] No pages found in result');
@@ -173,7 +208,7 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
     // Find lines that contain DDT or FATTURA near top
     for (let i = 0; i < allLines.length; i++) {
         const line = allLines[i];
-        const ddtItem = line.items.find(it => it.str.includes('DDT VENDITA') || it.str.includes('FATTURA'));
+        const ddtItem = line.items.find(it => it.str.includes('DDT VENDITA') || it.str.includes('FATTURA') || it.str.includes('PROGETTO'));
         if (ddtItem) {
             extractions['tipo_documento'] = ddtItem.str;
             break;
@@ -327,7 +362,10 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
 
     result.pages.forEach((page) => {
         const pageLines = page.lines;
-        const tableHeaderIdx = pageLines.findIndex(l => l.items.some(i => i.str.includes('CODICE ARTICOLO') || i.str === 'CODICE'));
+        const tableHeaderIdx = pageLines.findIndex(l => l.items.some(i => {
+          const s = i.str.toUpperCase();
+          return s.includes('CODICE ARTICOLO') || s === 'CODICE' || s === 'ARTICOLO' || s === 'DESCRIZIONE' || s === 'PREZZO UNIT.';
+        }));
 
         if (tableHeaderIdx === -1) return;
 
@@ -336,12 +374,18 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
             const headerItems = pageLines[tableHeaderIdx].items;
             for (let j = 0; j < headerItems.length; j++) {
                 const hi = headerItems[j];
-                if (hi.str === 'N.' || hi.str === 'N') colX['n'] = hi.x;
-                else if (hi.str.includes('CODICE ARTICOLO') || hi.str === 'CODICE') colX['codice'] = hi.x;
-                else if (hi.str.includes('DESCRIZIONE')) colX['descrizione'] = hi.x;
-                else if (hi.str === 'UM') colX['um'] = hi.x;
-                else if (hi.str.includes("QUANTITA'") || hi.str === 'Q.TA') colX['quantita'] = hi.x;
-                else if (hi.str.includes('MATRICOLA') || hi.str === 'SN') colX['matricola'] = hi.x;
+                const txt = hi.str.toUpperCase().trim();
+                
+                if (txt === 'N.' || txt === 'N') colX['n'] = hi.x;
+                else if (txt.includes('CODICE ARTICOLO') || txt === 'CODICE') colX['codice'] = hi.x;
+                else if (txt.includes('DESCRIZIONE')) colX['descrizione'] = hi.x;
+                else if (txt === 'UM') colX['um'] = hi.x;
+                else if (txt.includes("QUANTITA'") || txt === "QUANTITA" || txt === 'Q.TA' || txt === 'Q.TÀ') colX['quantita'] = hi.x;
+                else if (txt.includes('PREZZO UNIT.')) colX['prezzo_unit'] = hi.x;
+                else if (txt.includes('SC.%')) colX['sconto'] = hi.x;
+                else if (txt.includes('PREZZO TOT.')) colX['prezzo_tot'] = hi.x;
+                else if (txt.includes('C.IVA') || txt === 'IVA') colX['iva'] = hi.x;
+                else if (txt.includes('MATRICOLA') || txt === 'SN') colX['matricola'] = hi.x;
             }
 
 
@@ -350,7 +394,7 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
             if (!colX['descrizione']) colX['descrizione'] = colX['codice'] + 60;
             if (!colX['um']) colX['um'] = colX['descrizione'] + 150;
             if (!colX['quantita']) colX['quantita'] = colX['um'] + 30;
-            if (!colX['matricola']) colX['matricola'] = colX['quantita'] + 150;
+            if (!colX['matricola'] && type === DocumentTypes.DDT) colX['matricola'] = colX['quantita'] + 150;
         }
 
         const getColVal = (items: { str: string, x: number }[], expectedX: number, tolerance = 40, ignoreXs: number[] = []) => {
@@ -400,6 +444,12 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
                     extractions[`articolo_${artCount}`] = art.trim();
                     extractions[`descrizione_${artCount}`] = desc.replace(/\s+/g, ' ').trim();
                     extractions[`sn_${artCount}`] = (sn !== '/' && sn !== '' ? sn.trim() : '');
+                    
+                    // Extra invoice fields
+                    if (colX['prezzo_unit']) extractions[`prezzo_unit_${artCount}`] = getColVal(line.items, colX['prezzo_unit'], 40).trim();
+                    if (colX['sconto']) extractions[`sconto_${artCount}`] = getColVal(line.items, colX['sconto'], 40).trim();
+                    if (colX['prezzo_tot']) extractions[`prezzo_tot_${artCount}`] = getColVal(line.items, colX['prezzo_tot'], 40).trim();
+                    if (colX['iva']) extractions[`iva_${artCount}`] = getColVal(line.items, colX['iva'], 40).trim();
                 } else {
                     artCount--;
                 }
@@ -413,6 +463,19 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
             }
         }
     });
+
+    // 6. Post-process descriptions for Invoices and Technical docs to extract inline Serial Numbers
+    for (let i = 1; i <= artCount; i++) {
+        const desc = extractions[`descrizione_${i}`] || '';
+        if (desc) {
+            // Look for S/N: or MATR: or MATRICOLA: in description
+            const snMatch = desc.match(/s\/n[:\s]+([A-Z0-9\._-]+)/i) || desc.match(/MATR(?:ICOLA)?[:\.\s]+([A-Z0-9\._-]+)/i);
+            if (snMatch && (!extractions[`sn_${i}`] || extractions[`sn_${i}`] === '/')) {
+                extractions[`sn_${i}`] = snMatch[1].trim();
+            }
+        }
+    }
+
 
     const artCountTotal = Object.keys(extractions).filter(k => k.startsWith('articolo_')).length;
     console.log(`[PDF Parser] Table Articles extraction complete. Found ${artCountTotal} items.`);
@@ -432,7 +495,7 @@ export function autoFillFields(fields: FormField[], sourceData: string | PdfExtr
         normalizedText = sourceData.replace(/\s+/g, ' ');
     } else {
         normalizedText = sourceData.fullText.replace(/\s+/g, ' ');
-        spatialExtractions = extractDdtFields(sourceData);
+        spatialExtractions = extractStructuredFields(sourceData);
     }
 
     const extractions: Record<string, string> = { ...spatialExtractions };
