@@ -161,6 +161,10 @@ function App() {
           setUpdateBody(result.body || null);
           setUpdateDate(result.date || null);
           sendAppNotification("Nuovo Aggiornamento", `Versione ${result.latestVersion} disponibile!`);
+          
+          if (updSettings.autoInstall) {
+            installUpdate();
+          }
         }
       }).catch(err => console.error('[Update] Startup check error:', err));
     }
