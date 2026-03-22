@@ -19,10 +19,10 @@ jobs:
         include:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
-          - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
-          - platform: 'ubuntu-22.04'
-            args: ''
+          # - platform: 'macos-latest'
+          #   args: '--target x86_64-apple-darwin'
+          # - platform: 'ubuntu-22.04'
+          #   args: ''
           - platform: 'windows-latest'
             args: ''
 
@@ -127,26 +127,27 @@ jobs:
               const signature = (await res.text()).trim();
               
               let platform = '';
-              if (binaryName.includes('aarch64') && (binaryName.endsWith('.dmg') || binaryName.endsWith('.zip'))) {
+              if (binaryName.includes('aarch64') && (binaryName.endsWith('.app.tar.gz') || binaryName.endsWith('.dmg') || binaryName.endsWith('.zip'))) {
                 platform = 'darwin-aarch64';
-              } else if (binaryName.includes('x64') && (binaryName.endsWith('.dmg') || binaryName.endsWith('.zip'))) {
+              } else if ((binaryName.includes('x64') || binaryName.includes('x86_64')) && (binaryName.endsWith('.app.tar.gz') || binaryName.endsWith('.dmg') || binaryName.endsWith('.zip'))) {
                 platform = 'darwin-x86_64';
-              } else if (binaryName.includes('amd64') && binaryName.endsWith('.AppImage')) {
+              } else if ((binaryName.includes('amd64') || binaryName.includes('x86_64')) && (binaryName.endsWith('.AppImage') || binaryName.endsWith('.deb') || binaryName.endsWith('.rpm') || binaryName.endsWith('.tar.gz'))) {
                 platform = 'linux-x86_64';
-              } else if (binaryName.includes('x64') && binaryName.endsWith('.msi')) {
+              } else if (binaryName.includes('x64') && (binaryName.endsWith('.msi') || binaryName.endsWith('.exe') || binaryName.endsWith('.zip'))) {
                 platform = 'windows-x86_64';
-              } else if (binaryName.includes('x64') && binaryName.endsWith('.exe')) {
-                if (!manifest.platforms['windows-x86_64']) {
-                    platform = 'windows-x86_64';
-                }
               }
               
               if (platform) {
-                manifest.platforms[platform] = {
-                  signature,
-                  url: binaryAsset.browser_download_url
-                };
-                console.log(`Added platform ${platform}`);
+                const isPreferred = binaryName.endsWith('.app.tar.gz') || binaryName.endsWith('.AppImage') || binaryName.endsWith('.msi');
+                if (!manifest.platforms[platform] || isPreferred) {
+                  manifest.platforms[platform] = {
+                    signature,
+                    url: binaryAsset.browser_download_url
+                  };
+                  console.log(`Added platform ${platform} (${binaryName})`);
+                } else {
+                  console.log(`Skipped ${binaryName} for ${platform} as preferred asset is already set`);
+                }
               } else {
                 console.log(`Could not map ${binaryName} to a platform`);
               }
