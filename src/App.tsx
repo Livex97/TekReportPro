@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, Sun, Moon, Plus, Trash2, Brain, Database, Bell, RefreshCw, Layout, Save, RotateCcw, Server } from 'lucide-react';
+import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, Sun, Moon, Plus, Trash2, Brain, Database, Bell, RefreshCw, Layout, Save, RotateCcw, Server, X } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { open, save, ask, message } from '@tauri-apps/plugin-dialog';
 import { readFile, writeTextFile } from '@tauri-apps/plugin-fs';
@@ -14,9 +14,10 @@ import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate,
 import { sendAppNotification } from './utils/notifications';
 import { DEFAULT_SYSTEM_PROMPT } from './utils/ollama';
 import AIExtraction from './AIExtraction';
+import SterlinkManagerPage from './SterlinkManagerPage';
 import './App.css';
 
-type View = 'home' | 'settings' | 'form' | 'download' | 'ai-extraction';
+type View = 'home' | 'settings' | 'form' | 'download' | 'ai-extraction' | 'sterlink-manager';
 
 function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown }: any) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -81,7 +82,7 @@ function App() {
 
   // Update State
   const [updateSettings, setUpdateSettingsState] = useState<UpdateSettings>(DEFAULT_UPDATE_SETTINGS);
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloaded' | 'error'>('idle');
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloaded' | 'error' | 'up-to-date'>('idle');
   const [latestVersion, setLatestVersion] = useState<string>('');
   const [currentVersion, setCurrentVersion] = useState<string>('');
   const [updateBody, setUpdateBody] = useState<string | null>(null);
@@ -626,7 +627,7 @@ function App() {
     });
   };
 
-  const navigateView = async (targetView: 'home' | 'settings' | 'ai-extraction' | 'form') => {
+  const navigateView = async (targetView: View) => {
     if (currentView === 'form' && formFields.length > 0) {
       const excludedKeywords = ['DATA', 'N_DOC', 'N.DOC', 'NUMERO DOCUMENTO', 'DATA INTERVENTO'];
       const isDirty = formFields.some(f => {
@@ -855,40 +856,59 @@ function App() {
               Rapportini<span className="font-light text-neutral-800 dark:text-neutral-200">Tech</span>
             </h1>
           </div>
-          <div className="flex gap-2">
-            {currentView !== 'home' && (
+           <div className="flex gap-2">
+             <button
+               onClick={() => navigateView('home')}
+               className={`p-2 transition-colors rounded-lg ${
+                 currentView === 'home'
+                   ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                   : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
+               }`}
+               title="Home"
+             >
+               <HomeIcon className="w-6 h-6" />
+             </button>
               <button
-                onClick={() => navigateView('home')}
-                className="p-2 text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
-                title="Home"
+                onClick={() => navigateView('ai-extraction')}
+                className={`p-2 transition-colors rounded-lg ${
+                  currentView === 'ai-extraction'
+                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
+                }`}
+                title="Estrazione AI Automatica"
               >
-                <HomeIcon className="w-6 h-6" />
+                <Brain className="w-6 h-6" />
               </button>
-            )}
-            <button
-              onClick={toggleTheme}
-              className="p-2 text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
-              title={theme === 'light' ? 'Tema Scuro' : 'Tema Chiaro'}
-            >
-              {theme === 'light' ? <Moon className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
-            </button>
-            <button
-              onClick={() => navigateView('ai-extraction')}
-              className="p-2 text-neutral-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
-              title="Estrazione AI Automatica"
-            >
-              <Brain className="w-6 h-6" />
-            </button>
-            {currentView !== 'settings' && (
               <button
-                onClick={() => navigateView('settings')}
-                className="p-2 text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
-                title="Impostazioni Template"
+                onClick={() => navigateView('sterlink-manager')}
+                className={`p-2 transition-colors rounded-lg ${
+                  currentView === 'sterlink-manager'
+                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
+                }`}
+                title="Gestione Excel Sterlink"
               >
-                <Settings className="w-6 h-6" />
+                <Database className="w-6 h-6" />
               </button>
-            )}
-          </div>
+               <button
+                 onClick={() => navigateView('settings')}
+                 className={`p-2 transition-colors rounded-lg ${
+                   currentView === 'settings'
+                     ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                     : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
+                 }`}
+                 title="Impostazioni Template"
+               >
+                 <Settings className="w-6 h-6" />
+               </button>
+             <button
+               onClick={toggleTheme}
+               className="p-2 text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
+               title={theme === 'light' ? 'Tema Scuro' : 'Tema Chiaro'}
+             >
+               {theme === 'light' ? <Moon className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
+             </button>
+           </div>
         </div>
       </header>
 
@@ -1252,29 +1272,43 @@ function App() {
                   </h3>
                   <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Seleziona la cartella in cui verranno salvati i documenti generati.</p>
 
-                  <div className="flex gap-3 items-center">
-                    <input
-                      type="text"
-                      readOnly
-                      value={savePath || 'Nessuna cartella selezionata...'}
-                      className="flex-1 px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
-                    />
-                    <button
-                      onClick={async () => {
-                        const selected = await open({
-                          directory: true,
-                          multiple: false,
-                        });
-                        if (selected && typeof selected === 'string') {
-                          setSavePathState(selected);
-                          await setSavePath(selected);
-                        }
-                      }}
-                      className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
-                    >
-                      Sfoglia Cartella
-                    </button>
-                  </div>
+                   <div className="flex gap-3 items-center">
+                     <div className="relative flex-1">
+                       <input
+                         type="text"
+                         readOnly
+                         value={savePath || 'Nessuna cartella selezionata...'}
+                         className="w-full px-4 py-2 pr-8 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
+                       />
+                       {savePath && savePath.trim() !== '' && (
+                         <button
+                           onClick={async () => {
+                             setSavePathState('');
+                             await setSavePath('');
+                           }}
+                           className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-600 dark:text-neutral-500 rounded transition-colors"
+                           title="Rimuovi percorso"
+                         >
+                           <X className="w-4 h-4" />
+                         </button>
+                       )}
+                     </div>
+                     <button
+                       onClick={async () => {
+                         const selected = await open({
+                           directory: true,
+                           multiple: false,
+                         });
+                         if (selected && typeof selected === 'string') {
+                           setSavePathState(selected);
+                           await setSavePath(selected);
+                         }
+                       }}
+                       className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
+                     >
+                       Sfoglia Cartella
+                     </button>
+                   </div>
                 </div>
 
                 <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
@@ -1284,29 +1318,43 @@ function App() {
                   </h3>
                   <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Seleziona il file CSV principale per il log degli interventi.</p>
 
-                  <div className="flex gap-3 items-center">
-                    <input
-                      type="text"
-                      readOnly
-                      value={csvPath || 'Nessun file selezionato...'}
-                      className="flex-1 px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
-                    />
-                    <button
-                      onClick={async () => {
-                        const selected = await open({
-                          multiple: false,
-                          filters: [{ name: 'CSV Document', extensions: ['csv'] }]
-                        });
-                        if (selected && typeof selected === 'string') {
-                          setCsvPathState(selected);
-                          await setCsvPath(selected);
-                        }
-                      }}
-                      className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
-                    >
-                      Seleziona CSV
-                    </button>
-                  </div>
+                   <div className="flex gap-3 items-center">
+                     <div className="relative flex-1">
+                       <input
+                         type="text"
+                         readOnly
+                         value={csvPath || 'Nessun file selezionato...'}
+                         className="w-full px-4 py-2 pr-8 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
+                       />
+                       {csvPath && csvPath.trim() !== '' && (
+                         <button
+                           onClick={async () => {
+                             setCsvPathState('');
+                             await setCsvPath('');
+                           }}
+                           className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-600 dark:text-neutral-500 rounded transition-colors"
+                           title="Rimuovi percorso"
+                         >
+                           <X className="w-4 h-4" />
+                         </button>
+                       )}
+                     </div>
+                     <button
+                       onClick={async () => {
+                         const selected = await open({
+                           multiple: false,
+                           filters: [{ name: 'CSV Document', extensions: ['csv'] }]
+                         });
+                         if (selected && typeof selected === 'string') {
+                           setCsvPathState(selected);
+                           await setCsvPath(selected);
+                         }
+                       }}
+                       className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
+                     >
+                       Seleziona CSV
+                     </button>
+                   </div>
                 </div>
               </>
             )}
@@ -1493,7 +1541,7 @@ function App() {
                             setUpdateBody(result.body || null);
                             setUpdateDate(result.date || null);
                           } else {
-                            setUpdateStatus('idle');
+                            setUpdateStatus('up-to-date');
                           }
                         }}
                         disabled={updateStatus === 'checking' || isProcessing}
@@ -1612,7 +1660,20 @@ function App() {
                       </div>
                     )}
 
-                    {/* Settings Toggles */}
+                      {updateStatus === 'up-to-date' && (
+                      <div className="p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center shrink-0">
+                            <CheckCircle className="w-4 h-4 text-neutral-600 dark:text-neutral-400" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Applicazione Aggiornata</h4>
+                            <p className="text-xs text-neutral-500 dark:text-neutral-400">Non sono disponibili nuovi aggiornamenti. L'ultima versione installata è la più recente.</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  {/* Settings Toggles */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
                         <div className="flex items-center gap-3">
@@ -2076,11 +2137,18 @@ function App() {
           </div>
         )}
 
-        {/* --- VIEW: AI EXTRACTION --- */}
-        {currentView === 'ai-extraction' && (
-          <AIExtraction onBack={handleGoHome} theme={theme} />
-        )}
-      </main>
+         {/* --- VIEW: AI EXTRACTION --- */}
+         {currentView === 'ai-extraction' && (
+           <AIExtraction onBack={handleGoHome} theme={theme} />
+         )}
+
+         {/* --- VIEW: STERLINK MANAGER --- */}
+         {currentView === 'sterlink-manager' && (
+           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+             <SterlinkManagerPage />
+           </div>
+         )}
+       </main>
 
     </div>
   );
