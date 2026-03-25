@@ -452,6 +452,90 @@ function App() {
           }
           return f;
         });
+
+        // Task 34: Assign customLayout orders to auto-generated fields to maintain visual progression
+        const newLayout = { ...customLayout };
+        let layoutUpdated = false;
+
+        // Identify fields that are not yet in customLayout (auto-generated)
+        const fieldsWithoutLayout = finalizedFields.filter(f => !customLayout[f.id]);
+
+        if (fieldsWithoutLayout.length > 0) {
+          // Group new fields by section
+          const fieldsBySection = fieldsWithoutLayout.reduce((acc: Record<string, FormField[]>, field) => {
+            const sectionId = getFieldSection(field);
+            if (!acc[sectionId]) acc[sectionId] = [];
+            acc[sectionId].push(field);
+            return acc;
+          }, {});
+
+          // Process each section
+          Object.entries(fieldsBySection).forEach(([sectionId, newFieldsInSection]) => {
+            // Get all fields in this section from finalizedFields to locate template _1 fields
+            const allSectionFields = finalizedFields.filter(f => getFieldSection(f) === sectionId);
+            const fieldsIndex1 = allSectionFields.filter(f => f.label.endsWith('_1') || f.id.endsWith('_1'));
+            if (fieldsIndex1.length === 0) return;
+
+            const rowPrefixes = fieldsIndex1.map(f => ({
+              labelPrefix: f.label.replace(/_1$/, ''),
+              idPrefix: f.id.replace(/_1$/, '')
+            }));
+
+            // Find max existing order in this section among fields already in customLayout
+            let maxExistingOrder = 0;
+            allSectionFields.forEach(f => {
+              const order = customLayout[f.id]?.order;
+              if (order !== undefined && order > maxExistingOrder) {
+                maxExistingOrder = order;
+              }
+            });
+
+            // Group new fields by row suffix and then by prefix
+            const rowGroups = new Map<number, Map<string, FormField>>();
+            newFieldsInSection.forEach(field => {
+              const labelMatch = field.label.match(/_(\d+)$/);
+              const idMatch = field.id.match(/_(\d+)$/);
+              const suffix = labelMatch ? parseInt(labelMatch[1], 10) : (idMatch ? parseInt(idMatch[1], 10) : null);
+              if (suffix === null) return;
+
+              // Determine which prefix group this field belongs to
+              const prefixIdx = rowPrefixes.findIndex(p => 
+                (labelMatch && field.label.startsWith(p.labelPrefix)) ||
+                (idMatch && field.id.startsWith(p.idPrefix))
+              );
+              if (prefixIdx === -1) return;
+
+              const prefixKey = rowPrefixes[prefixIdx].labelPrefix;
+              if (!rowGroups.has(suffix)) rowGroups.set(suffix, new Map());
+              rowGroups.get(suffix)!.set(prefixKey, field);
+            });
+
+            // Process each row group in suffix order
+            const sortedSuffixes = Array.from(rowGroups.keys()).sort((a, b) => a - b);
+            sortedSuffixes.forEach((suffix, rowIdx) => {
+              const prefixMap = rowGroups.get(suffix)!;
+              // Assign orders in the same sequence as fieldsIndex1
+              fieldsIndex1.forEach((_, idx) => {
+                const prefix = rowPrefixes[idx].labelPrefix;
+                const field = prefixMap.get(prefix);
+                if (field) {
+                  const order = maxExistingOrder + 1 + rowIdx * fieldsIndex1.length + idx;
+                  newLayout[field.id] = { sectionId, order };
+                  layoutUpdated = true;
+                }
+              });
+            });
+          });
+        }
+
+        // Save layout if updated
+        if (layoutUpdated) {
+          setCustomLayoutState(newLayout);
+          if (activeSlotId) {
+            await setCustomLayout(activeSlotId, newLayout);
+          }
+        }
+
         const nextN_Richiesta = finalizedFields.find(f => f.label.toUpperCase() === 'N_RICHIESTA' || f.id.toUpperCase() === 'N_RICHIESTA')?.value;
         if (nextN_Richiesta && nextN_Richiesta.trim() !== '') {
           setFormFields(finalizedFields.map(f =>
