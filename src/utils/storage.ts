@@ -424,4 +424,144 @@ export async function resetAllSettings(): Promise<void> {
     } catch (e) {
         console.error('[Storage] Error during reset:', e);
     }
+
+    // Delete Excel cache
+    try {
+        await remove(`excel/pandetta_data.xlsx`, { baseDir: BaseDirectory.AppData }).catch(() => {});
+        await remove(`excel/sterlink_data.xlsx`, { baseDir: BaseDirectory.AppData }).catch(() => {});
+    } catch (e) {}
+}
+
+
+// ===========================
+// EXCEL STORAGE (Task 42)
+// ===========================
+
+/**
+ * Saves an Excel file to Local Disk (AppData)
+ */
+export async function saveExcelFile(type: 'pandetta' | 'sterlink', file: File, originalPath?: string | null) {
+    // 1. Ensure directory exists
+    try {
+        await mkdir('excel', { baseDir: BaseDirectory.AppData, recursive: true });
+    } catch(e) {}
+    
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+
+    // 2. Save the file to AppData (cache/backup)
+    const fileName = `${type}_data.xlsx`;
+    await writeFile(`excel/${fileName}`, bytes, { baseDir: BaseDirectory.AppData });
+    
+    // 3. IMPORTANT: Directly overwrite the source file on disk
+    if (originalPath) {
+        try {
+            console.log(`[Storage] Overwriting source file at: ${originalPath}`);
+            await writeFile(originalPath, bytes);
+        } catch (e) {
+            console.error(`[Storage] Failed to overwrite original file at ${originalPath}:`, e);
+        }
+    }
+
+    // 4. Save file name and path to store
+    const store = await getStore();
+    await store.set(`${type}_file_name`, file.name);
+    if (originalPath) {
+        await store.set(`${type}_file_path`, originalPath);
+    }
+    await store.save();
+}
+
+/**
+ * Retrieves an Excel file from Local Disk
+ */
+export async function getExcelFile(type: 'pandetta' | 'sterlink'): Promise<File | undefined> {
+    try {
+        const store = await getStore();
+        const fileName = await store.get<string>(`${type}_file_name`);
+        if (!fileName) return undefined;
+
+        const content = await readFile(`excel/${type}_data.xlsx`, { baseDir: BaseDirectory.AppData });
+        return new File([content], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    } catch (e) {
+        return undefined;
+    }
+}
+
+/**
+ * Gets the stored original file name for an Excel manager
+ */
+export async function getExcelFileName(type: 'pandetta' | 'sterlink'): Promise<string | null | undefined> {
+    try {
+        const store = await getStore();
+        return await store.get<string>(`${type}_file_name`);
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Removes persistent Excel data for a manager
+ */
+export async function clearExcelFile(type: 'pandetta' | 'sterlink') {
+    try {
+        const store = await getStore();
+        await store.delete(`${type}_file_name`);
+        await store.delete(`${type}_file_path`);
+        await store.save();
+
+        // 2. Remove the actual Excel file
+        await remove(`excel/${type}_data.xlsx`, { baseDir: BaseDirectory.AppData }).catch(() => {});
+        // 3. Remove the JSON data file
+        await remove(`excel/${type}_data.json`, { baseDir: BaseDirectory.AppData }).catch(() => {});
+    } catch (e) {
+        console.error(`[Storage] Error clearing ${type} file:`, e);
+    }
+}
+
+/**
+ * Gets the stored original file path for an Excel manager
+ */
+export async function getExcelFilePath(type: 'pandetta' | 'sterlink'): Promise<string | null | undefined> {
+    try {
+        const store = await getStore();
+        return await store.get<string>(`${type}_file_path`);
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Gets the raw ArrayBuffer of an Excel file
+ */
+export async function getExcelFileBuffer(type: 'pandetta' | 'sterlink'): Promise<ArrayBuffer | undefined> {
+    try {
+        return await readFile(`excel/${type}_data.xlsx`, { baseDir: BaseDirectory.AppData }).then(c => c.buffer);
+    } catch (e) {
+        return undefined;
+    }
+}
+
+/**
+ * Saves Excel data as JSON to Local Disk (AppData)
+ */
+export async function saveExcelDataJson(type: 'pandetta' | 'sterlink', data: any[]) {
+    try {
+        await mkdir('excel', { baseDir: BaseDirectory.AppData, recursive: true });
+        await writeFile(`excel/${type}_data.json`, new TextEncoder().encode(JSON.stringify(data)), { baseDir: BaseDirectory.AppData });
+    } catch (e) {
+        console.error(`[Storage] Error saving ${type} JSON data:`, e);
+    }
+}
+
+/**
+ * Retrieves Excel data as JSON from Local Disk
+ */
+export async function getExcelDataJson(type: 'pandetta' | 'sterlink'): Promise<any[] | undefined> {
+    try {
+        const content = await readFile(`excel/${type}_data.json`, { baseDir: BaseDirectory.AppData });
+        return JSON.parse(new TextDecoder().decode(content));
+    } catch (e) {
+        return undefined;
+    }
 }

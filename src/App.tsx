@@ -10,7 +10,7 @@ import { extractFieldsFromDocx, extractTextFromDocx } from './utils/docxParser';
 import type { FormField } from './utils/docxParser';
 import { autoFillFields, extractTextFromPdf } from './utils/pdfParser';
 import { generateDocx } from './utils/documentGenerator';
-import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath, getSavePath, setSavePath, getNextDocNumber, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS, getUpdateSettings, setUpdateSettings, checkForUpdates, installUpdate, getCurrentVersion, type UpdateSettings, DEFAULT_UPDATE_SETTINGS, getSectionDefinitions, setSectionDefinitions, type SectionDefinition, DEFAULT_SECTIONS, exportAllSettings, importAllSettings, resetAllSettings } from './utils/storage';
+import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath, getSavePath, setSavePath, getNextDocNumber, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS, getUpdateSettings, setUpdateSettings, checkForUpdates, installUpdate, getCurrentVersion, type UpdateSettings, DEFAULT_UPDATE_SETTINGS, getSectionDefinitions, setSectionDefinitions, type SectionDefinition, DEFAULT_SECTIONS, exportAllSettings, importAllSettings, resetAllSettings, getExcelFileName, getExcelFilePath, clearExcelFile } from './utils/storage';
 import { sendAppNotification } from './utils/notifications';
 import { DEFAULT_SYSTEM_PROMPT } from './utils/ollama';
 import AIExtraction from './AIExtraction';
@@ -64,7 +64,7 @@ const POPULAR_ICONS = [
 ];
 
 function App() {
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'templates' | 'ai' | 'advanced'>('general');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'templates' | 'ai' | 'advanced' | 'managers'>('general');
   const [isIconPickerOpen, setIsIconPickerOpen] = useState<number | null>(null);
 
   const [currentView, setCurrentView] = useState<View>('home');
@@ -98,6 +98,10 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [sectionDefinitions, setSectionDefinitionsState] = useState<SectionDefinition[]>(DEFAULT_SECTIONS);
   const [isSectionsSaved, setIsSectionsSaved] = useState(false);
+  const [pandettaFileName, setPandettaFileName] = useState<string | null>(null);
+  const [pandettaFilePath, setPandettaFilePath] = useState<string | null>(null);
+  const [sterlinkFileName, setSterlinkFileName] = useState<string | null>(null);
+  const [sterlinkFilePath, setSterlinkFilePath] = useState<string | null>(null);
   const actionLock = useRef(false);
 
 
@@ -173,6 +177,16 @@ function App() {
 
     const sections = await getSectionDefinitions();
     setSectionDefinitionsState(sections);
+
+    const pFile = await getExcelFileName('pandetta');
+    setPandettaFileName(pFile || null);
+    const pPath = await getExcelFilePath('pandetta');
+    setPandettaFilePath(pPath || null);
+
+    const sFile = await getExcelFileName('sterlink');
+    setSterlinkFileName(sFile || null);
+    const sPath = await getExcelFilePath('sterlink');
+    setSterlinkFilePath(sPath || null);
   };
 
   // Task 8: Drag and Drop Listeners
@@ -1091,6 +1105,7 @@ function App() {
             <div className="flex flex-wrap gap-2 mb-8 border-b border-neutral-200 dark:border-neutral-700 pb-4">
               {[
                 { id: 'general', label: 'Impostazioni Generali', icon: <Settings className="w-4 h-4" /> },
+                { id: 'managers', label: 'Database & Manager', icon: <Database className="w-4 h-4" /> },
                 { id: 'templates', label: 'Template & Sezioni', icon: <Layout className="w-4 h-4" /> },
                 { id: 'ai', label: 'IA & Analisi', icon: <Brain className="w-4 h-4" /> },
                 { id: 'advanced', label: 'Sistema & Dati', icon: <Server className="w-4 h-4" /> }
@@ -1406,54 +1421,168 @@ function App() {
                      </button>
                    </div>
                 </div>
-
-                <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
-                    <Database className="w-6 h-6 text-emerald-500" />
-                    Database CSV Pandetta
-                  </h3>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Seleziona il file CSV principale per il log degli interventi.</p>
-
-                   <div className="flex gap-3 items-center">
-                     <div className="relative flex-1">
-                       <input
-                         type="text"
-                         readOnly
-                         value={csvPath || 'Nessun file selezionato...'}
-                         className="w-full px-4 py-2 pr-8 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
-                       />
-                       {csvPath && csvPath.trim() !== '' && (
-                         <button
-                           onClick={async () => {
-                             setCsvPathState('');
-                             await setCsvPath('');
-                           }}
-                           className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-600 dark:text-neutral-500 rounded transition-colors"
-                           title="Rimuovi percorso"
-                         >
-                           <X className="w-4 h-4" />
-                         </button>
-                       )}
-                     </div>
-                     <button
-                       onClick={async () => {
-                         const selected = await open({
-                           multiple: false,
-                           filters: [{ name: 'CSV Document', extensions: ['csv'] }]
-                         });
-                         if (selected && typeof selected === 'string') {
-                           setCsvPathState(selected);
-                           await setCsvPath(selected);
-                         }
-                       }}
-                       className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
-                     >
-                       Seleziona CSV
-                     </button>
-                   </div>
-                </div>
               </>
             )}
+
+            {/* --- TAB: MANAGERS --- */}
+            {activeSettingsTab === 'managers' && (
+              <div className="space-y-8">
+                {/* Pandetta Manager Settings */}
+                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center">
+                      <Database className="w-6 h-6 text-blue-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Pandetta Manager</h3>
+                      <p className="text-sm text-neutral-500 dark:text-neutral-400">Configurazione database e file sorgente per Pandetta.</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <Save className="w-3 h-3" />
+                        Database CSV Destinazione (Output)
+                      </label>
+                      <div className="flex gap-3 items-center">
+                        <div className="relative flex-1">
+                          <input
+                            type="text"
+                            readOnly
+                            value={csvPath || 'Nessun file selezionato...'}
+                            className="w-full px-4 py-2 pr-8 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
+                          />
+                          {csvPath && csvPath.trim() !== '' && (
+                            <button
+                              onClick={async () => {
+                                setCsvPathState('');
+                                await setCsvPath('');
+                              }}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-600 dark:text-neutral-500 rounded transition-colors"
+                              title="Rimuovi percorso"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                        <button
+                          onClick={async () => {
+                            const selected = await open({
+                              multiple: false,
+                              filters: [{ name: 'CSV Document', extensions: ['csv'] }]
+                            });
+                            if (selected && typeof selected === 'string') {
+                              setCsvPathState(selected);
+                              await setCsvPath(selected);
+                            }
+                          }}
+                          className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
+                        >
+                          Seleziona CSV
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                            <FileSpreadsheet className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Dataset Persistente (Excel)</h4>
+                            <p className="text-xs text-neutral-500">{pandettaFileName || 'Nessun file caricato (utilizza la pagina Pandetta Manager)'}</p>
+                          </div>
+                        </div>
+                        {(pandettaFileName || pandettaFilePath) && (
+                          <button
+                            onClick={async () => {
+                              const confirmed = await ask("Vuoi davvero rimuovere il file Excel persistente per Pandetta Manager? Dovrai caricarlo nuovamente per utilizzare la pagina.", { title: 'Rimuovi Cache Pandetta', kind: 'warning' });
+                              if (confirmed) {
+                                await clearExcelFile('pandetta');
+                                setPandettaFileName(null);
+                                setPandettaFilePath(null);
+                              }
+                            }}
+                            className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded-lg transition-colors border border-red-200 dark:border-red-800"
+                          >
+                            Dimentica File
+                          </button>
+                        )}
+                      </div>
+                      {pandettaFilePath && (
+                        <p className="mt-2 text-[10px] text-neutral-400 bg-neutral-100 dark:bg-neutral-800/50 p-2 rounded-lg break-all font-mono">
+                          {pandettaFilePath}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sterlink Manager Settings */}
+                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center">
+                      <Layout className="w-6 h-6 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Sterlink Manager</h3>
+                      <p className="text-sm text-neutral-500 dark:text-neutral-400">Configurazione file sorgente per Sterlink.</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                          <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Dataset Persistente (Excel)</h4>
+                          <p className="text-xs text-neutral-500">{sterlinkFileName || 'Nessun file caricato (utilizza la pagina Sterlink Manager)'}</p>
+                        </div>
+                      </div>
+                      {(sterlinkFileName || sterlinkFilePath) && (
+                        <button
+                          onClick={async () => {
+                            const confirmed = await ask("Vuoi davvero rimuovere il file Excel persistente per Sterlink Manager? Dovrai caricarlo nuovamente per utilizzare la pagina.", { title: 'Rimuovi Cache Sterlink', kind: 'warning' });
+                            if (confirmed) {
+                              await clearExcelFile('sterlink');
+                              setSterlinkFileName(null);
+                              setSterlinkFilePath(null);
+                            }
+                          }}
+                          className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded-lg transition-colors border border-red-200 dark:border-red-800"
+                        >
+                          Dimentica File
+                        </button>
+                      )}
+                    </div>
+                    {sterlinkFilePath && (
+                      <p className="mt-2 text-[10px] text-neutral-400 bg-neutral-100 dark:bg-neutral-800/50 p-2 rounded-lg break-all font-mono">
+                        {sterlinkFilePath}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* storage location info */}
+                <div className="p-6 bg-neutral-100 dark:bg-neutral-900/50 rounded-2xl border border-neutral-200 dark:border-neutral-700">
+                  <div className="flex items-start gap-4">
+                    <Server className="w-6 h-6 text-neutral-400 mt-1" />
+                    <div>
+                      <h4 className="text-sm font-bold text-neutral-700 dark:text-neutral-300">Posizione Dati Locali</h4>
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                        I dataset sono memorizzati in locale nella cartella dei dati dell'applicazione per garantirti un accesso rapido ed offline.
+                        I file originali non vengono modificati.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
 
             {/* --- TAB: AI & ANALYSIS --- */}
             {activeSettingsTab === 'ai' && (
@@ -2241,14 +2370,24 @@ function App() {
           {/* --- VIEW: STERLINK MANAGER --- */}
           {currentView === 'sterlink-manager' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <SterlinkManagerPage />
+              <SterlinkManagerPage 
+                onFileSelected={(name: string, path: string | null) => {
+                  setSterlinkFileName(name);
+                  setSterlinkFilePath(path);
+                }} 
+              />
             </div>
           )}
 
           {/* --- VIEW: PANDETTA MANAGER --- */}
           {currentView === 'pandetta-manager' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full">
-              <PandettaManager />
+              <PandettaManager 
+                onFileSelected={(name: string, path: string | null) => {
+                  setPandettaFileName(name);
+                  setPandettaFilePath(path);
+                }} 
+              />
             </div>
           )}
        </main>
