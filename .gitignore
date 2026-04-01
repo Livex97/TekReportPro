@@ -37,3 +37,6 @@ parsePdf.js
 # Scripts
 bump-version.cjs
 push-release.cjs
+
+# Build artifacts
+/build

@@ -17,14 +17,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
+          - platform: 'macos-14'
             args: '--target aarch64-apple-darwin'
-          # - platform: 'macos-latest'
-          #   args: '--target x86_64-apple-darwin'
-          # - platform: 'ubuntu-22.04'
-          #   args: ''
+            target: 'aarch64-apple-darwin'
           - platform: 'windows-latest'
             args: ''
+            target: 'x86_64-pc-windows-msvc'
 
     runs-on: ${{ matrix.platform }}
 
@@ -56,6 +54,36 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm install
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller openpyxl
+
+      - name: Compile Python Sidecar
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          # Compila lo script
+          pyinstaller --onefile --clean src-tauri/python/save_pandetta.py
+          
+          # Determina il nome del file di output (con .exe su Windows)
+          if [ "${{ matrix.platform }}" == "windows-latest" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          
+          # Copia e rinomina per il target specifico di Tauri
+          cp dist/save_pandetta${EXT} src-tauri/binaries/save_pandetta-${{ matrix.target }}${EXT}
+          
+          # Verifica
+          ls -R src-tauri/binaries
 
       - name: Build the Tauri app
         uses: tauri-apps/tauri-action@v0

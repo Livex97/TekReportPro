@@ -1,10 +1,10 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { FileSpreadsheet, Upload, Download, Search, X, Plus, CheckCircle, AlertCircle, Clock, Edit2, Trash2, ArrowLeft } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { FileSpreadsheet, Upload, Download, Search, X, Plus, CheckCircle, AlertCircle, Clock, Edit2, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { save, open } from '@tauri-apps/plugin-dialog';
-import { saveExcelFile, getExcelFile, getExcelFileBuffer, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting } from './utils/storage';
+import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting } from './utils/storage';
+import { invoke } from '@tauri-apps/api/core';
 import ExcelJS from 'exceljs';
 
 // Tipi
@@ -13,24 +13,18 @@ interface PandettaRow {
   _status: 'aperta' | 'chiusa' | 'irreparabile';
   _empty: boolean;
   _originalBg?: string | null;
+  _new?: boolean;
 }
 
 interface PandettaManagerProps {
   onFileSelected?: (name: string, path: string | null) => void;
+  className?: string;
 }
 
 type ViewState = 'upload' | 'table';
 
-const COLS = [
-  'RICHIESTA INTERVENTO','DATA','CLIENTE','UBICAZIONE',
-  'STRUMENTO DA RIPARARE',"TIPO DI ATTIVITA'/GUASTO",
-  'DDT RITIRO','DATA RITIRO','GARANZIA (G) - CONTRATTO (C)',
-  'N.PREV GT','DATA PREVENTIVO','ACCETTAZIONE PREV GT','DATA ACCETTAZIONE',
-  'STATO INTERVENTO','ESITO','DDT CONSEGNA','DATA CONSEGNA',
-  'RAPPORTO N.','TECNICO','N.RIF PANDETTA'
-];
-
-const COL_LABELS: Record<string, string> = {
+// Mappa label statiche per colonne note
+const COL_LABELS_MAP: Record<string, string> = {
   'N.RIF PANDETTA': 'N.RIF',
   'RICHIESTA INTERVENTO': 'Richiesta',
   'DATA': 'Data',
@@ -53,8 +47,6 @@ const COL_LABELS: Record<string, string> = {
   'TECNICO': 'Tecnico'
 };
 
-const TABLE_COLS = ['N.RIF PANDETTA', ...COLS.filter(col => col !== 'N.RIF PANDETTA')];
-
 const TECNICO_PALETTE = [
   { name: 'MEZZAPESA',   bg: 'rgba(59,130,246,0.18)', text: '#93c5fd', export: '1e40af' },
   { name: 'ALLEGREZZA',  bg: 'rgba(167,139,250,0.22)', text: '#c4b5fd', export: '7c3aed' },
@@ -69,10 +61,6 @@ const DYNAMIC_COLORS = [
   { bg: 'rgba(34,211,238,0.2)',  text: '#22d3ee', export: '164e63' },
 ];
 
-interface PandettaManagerProps {
-  className?: string;
-}
-
 interface TecnicoColor {
   bg: string;
   text: string;
@@ -84,15 +72,17 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
   const [rows, setRows] = useState<PandettaRow[]>([]);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [isNew, setIsNew] = useState(false);
-   const [filter, setFilter] = useState<'all' | 'aperta' | 'chiusa' | 'irreparabile'>('all');
-   const [searchTerm, setSearchTerm] = useState('');
-   const [sortCol, setSortCol] = useState<string | null>(null);
-   const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const [filter, setFilter] = useState<'all' | 'aperta' | 'chiusa' | 'irreparabile'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [fileName, setFileName] = useState('Pandetta_2026.xlsx');
   const [originalPath, setOriginalPath] = useState<string | null>(null);
   const [tecnicoColorMap, setTecnicoColorMap] = useState<Record<string, TecnicoColor>>({});
   const [isDragging, setIsDragging] = useState(false);
-  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' | 'loading' } | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [dynamicCols, setDynamicCols] = useState<string[]>([]);
 
   // Drag & Drop
   useEffect(() => {
@@ -108,14 +98,23 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
         if (jsonData && jsonData.length > 0) {
           setRows(jsonData);
           buildTecnicoColorMap(jsonData);
+          
+          const savedCols = await getSetting<string[]>('pandetta_dynamic_cols', []);
+          if (savedCols.length > 0) {
+            setDynamicCols(savedCols);
+          } else {
+            const cols = Object.keys(jsonData[0]).filter(k => !k.startsWith('_'));
+            setDynamicCols(cols);
+          }
+          
           setView('table');
         } else {
           const file = await getExcelFile('pandetta');
           if (file) {
             const buffer = await file.arrayBuffer();
-            const wb = XLSX.read(buffer, { type: 'array', cellStyles: true, cellDates: true });
-            const ws = wb.Sheets[wb.SheetNames[0]];
-            parseSheet(ws);
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.load(buffer);
+            await parseSheet(wb);
             setView('table');
           }
         }
@@ -124,7 +123,7 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
       }
     };
     loadPersistentData();
-  }, []); // Run only once on mount
+  }, []);
 
   useEffect(() => {
     let unlistenEnter: (() => void) | null = null;
@@ -163,12 +162,14 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
       if (unlistenLeave) unlistenLeave();
       if (unlistenDrop) unlistenDrop();
     };
-  }, [view]); // Maintain view dependency for drop listener condition
+  }, [view]);
 
-  // Toast function
-  const toast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+  // Toast
+  const toast = (text: string, type: 'success' | 'error' | 'info' | 'loading' = 'info') => {
     setToastMsg({ text, type });
-    setTimeout(() => setToastMsg(null), 3000);
+    if (type !== 'loading') {
+      setTimeout(() => setToastMsg(null), 3000);
+    }
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -221,33 +222,22 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
   }, [tecnicoColorMap]);
 
   // ── FILE HANDLING ──
-  const handleFile = (file: File, path?: string | null) => {
+  const handleFile = async (file: File, path?: string | null) => {
     setFileName(file.name);
     if (path) setOriginalPath(path);
     if (onFileSelected) onFileSelected(file.name, path || null);
     saveExcelFile('pandetta', file, path).catch(err => console.error('Error saving file:', err));
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const wb = XLSX.read(e.target?.result, { type: 'array', cellStyles: true, cellDates: true });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        parseSheet(ws);
-        setView('table');
-        toast(`File caricato: ${file.name}`, 'success');
-      } catch (err: any) {
-        toast(`Errore nel caricamento: ${err.message}`, 'error');
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-
-  const cellVal = (ws: any, r: number, c: number) => {
-    const addr = XLSX.utils.encode_cell({ r, c });
-    const cell = ws[addr];
-    if (!cell) return null;
-    if (cell.t === 'd') return formatDate(cell.v);
-    if (cell.v === undefined || cell.v === null) return null;
-    return String(cell.v);
+    
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buffer);
+      await parseSheet(wb);
+      setView('table');
+      toast(`File caricato: ${file.name}`, 'success');
+    } catch (err: any) {
+      toast(`Errore nel caricamento: ${err.message}`, 'error');
+    }
   };
 
   const formatDate = (d: any) => {
@@ -259,42 +249,139 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
     return `${dd}/${mm}/${dt.getFullYear()}`;
   };
 
-  const getCellRgb = (ws: any, r: number, c: number) => {
-    const addr = XLSX.utils.encode_cell({ r, c });
-    const cell = ws[addr];
-    if (!cell || !cell.s) return null;
-    const fc = cell.s.fgColor;
-    if (!fc) return null;
-    if (fc.rgb && typeof fc.rgb === 'string' && fc.rgb.length >= 6) return fc.rgb;
+  // Trova il foglio PANDETTA per nome
+  const findPandettaSheet = (wb: any) => {
+    const sheets = wb.worksheets || [];
+    const sheetNames: string[] = [];
+    for (const ws of sheets) {
+      const name = ws.name;
+      if (typeof name === 'string') {
+        sheetNames.push(name);
+      }
+    }
+    const pandettaSheet = sheetNames.find((name: string) => 
+      name.toUpperCase().includes('PANDETTA') || 
+      name.toUpperCase().includes('PANDET') ||
+      name.toUpperCase().includes('ASSISTENZA')
+    );
+    return pandettaSheet || sheetNames[0];
+  };
+
+  const getCellRgbFromExcelJS = (cell: any) => {
+    if (!cell || !cell.fill) return null;
+    const fill = cell.fill;
+    if (fill.type === 'pattern' && fill.fgColor && fill.fgColor.argb) {
+      return fill.fgColor.argb.replace(/^FF/i, '');
+    }
     return null;
   };
 
-  const parseSheet = async (ws: any) => {
-    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  const parseSheet = async (wb: any) => {
+    const sheetName = findPandettaSheet(wb);
+    const ws = wb.worksheets.find((ws: any) => ws.name === sheetName) || wb.worksheets[0];
+    
+    // Leggi la prima riga come intestazione
+    const headerRow = ws.getRow(1);
+    const colCount = headerRow.cellCount;
+    
+    // Identifica le colonne dinamicamente
+    const cols: string[] = [];
+    const colIndices: number[] = [];
+    
+    for (let c = 1; c <= colCount; c++) {
+      const cell = headerRow.getCell(c);
+      const header = cell.value;
+      if (header != null && String(header).trim() !== '') {
+        cols.push(String(header).trim());
+        colIndices.push(c - 1); // 0-based per uso successivo
+      }
+    }
+    
+    if (cols.length === 0) {
+      throw new Error('Impossibile identificare le colonne nella prima riga');
+    }
+    
+    setDynamicCols(cols);
+    
     const newRows: PandettaRow[] = [];
-
-    for (let r = 1; r <= range.e.r; r++) {
+    const rowCount = ws.rowCount;
+    
+    // Inizia dalla riga 2 (dopo l'intestazione)
+    for (let r = 2; r <= rowCount; r++) {
+      const xlRow = ws.getRow(r);
+      
+      // Verifica se la riga è vuota (controlla le prime 3 colonne)
+      let hasData = false;
+      for (let i = 0; i < Math.min(3, cols.length); i++) {
+        const cell = xlRow.getCell(colIndices[i] + 1);
+        const val = cell.value;
+        if (val != null && val !== '' && val !== 'null') {
+          hasData = true;
+          break;
+        }
+      }
+      
+      if (!hasData) {
+        const emptyRow: PandettaRow = { 
+          _originalBg: null,
+          _empty: true,
+          _status: 'aperta'
+        };
+        for (const col of cols) {
+          emptyRow[col] = null;
+        }
+        newRows.push(emptyRow);
+        continue;
+      }
+      
       const row: PandettaRow = { _status: 'aperta', _empty: false };
-      COLS.forEach((col, ci) => {
-        row[col] = cellVal(ws, r, ci);
-      });
-      const rowBg = getCellRgb(ws, r, 0);
+      
+      // Popola i valori dalle colonne identificate
+      for (let idx = 0; idx < cols.length; idx++) {
+        const col = cols[idx];
+        const cell = xlRow.getCell(colIndices[idx] + 1);
+        let value = cell.value;
+        
+        if (value instanceof Date) {
+          value = formatDate(value);
+        } else if (value !== null && value !== undefined) {
+          value = String(value);
+        } else {
+          value = null;
+        }
+        
+        row[col] = value;
+      }
+      
+      // Ottieni il colore di sfondo dalla prima colonna
+      const bgCell = xlRow.getCell(1);
+      const rowBg = getCellRgbFromExcelJS(bgCell);
       row._originalBg = rowBg;
-      row._status = deriveStatus(row['STATO INTERVENTO'], row['ESITO'], rowBg);
-
-      const hasData = COLS.slice(0, 3).some(c => row[c] && row[c] !== 'null');
-      row._empty = !hasData;
+      
+      // Deriva lo stato usando le colonne identificate
+      const statoCol = cols.find(c => c.toUpperCase().includes('STATO') && c.toUpperCase().includes('INTERVENTO'));
+      const esitoCol = cols.find(c => c.toUpperCase().includes('ESITO'));
+      
+      const statoVal = statoCol ? row[statoCol] : null;
+      const esitoVal = esitoCol ? row[esitoCol] : null;
+      
+      row._status = deriveStatus(statoVal, esitoVal, rowBg);
+      
       newRows.push(row);
     }
-
-    while (newRows.length > 0 && newRows[newRows.length - 1]._empty) newRows.pop();
+    
+    // Rimuovi le righe vuote finali
+    while (newRows.length > 0 && newRows[newRows.length - 1]._empty) {
+      newRows.pop();
+    }
     
     setRows(newRows);
     buildTecnicoColorMap(newRows);
     
-    // Save to JSON and meta
+    // Salva i metadati
     await saveExcelDataJson('pandetta', newRows);
     await setSetting('pandetta_original_rows_count', newRows.length);
+    await setSetting('pandetta_dynamic_cols', cols);
   };
 
   const getVisibleRows = useCallback(() => {
@@ -302,127 +389,91 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
     if (filter !== 'all') visible = visible.filter(r => r._status === filter);
     if (searchTerm) {
       const s = searchTerm.toLowerCase();
-      visible = visible.filter(r => COLS.some(c => r[c] && String(r[c]).toLowerCase().includes(s)));
+      visible = visible.filter(r => dynamicCols.some(c => r[c] && String(r[c]).toLowerCase().includes(s)));
     }
     if (sortCol) {
       visible.sort((a, b) => String(a[sortCol] || '').localeCompare(String(b[sortCol] || '')) * sortDir);
     }
     return visible;
-  }, [rows, filter, searchTerm, sortCol, sortDir]);
+  }, [rows, filter, searchTerm, sortCol, sortDir, dynamicCols]);
 
-  const exportXlsx = async () => {
-    if (rows.length === 0) {
-      toast('Nessun dato da esportare', 'error');
-      return;
-    }
+   const exportXlsx = async () => {
+     if (rows.length === 0) {
+       toast('Nessun dato da esportare', 'error');
+       return;
+     }
 
-    try {
-      const origBuffer = await getExcelFileBuffer('pandetta');
-      if (!origBuffer) {
-        toast('File originale non trovato', 'error');
-        return;
-      }
+     try {
+       let outputPath = originalPath;
+       // Se non c'è un percorso originale, chiedi all'utente dove salvare
+       if (!outputPath) {
+         outputPath = await save({
+           defaultPath: fileName.replace(/\.(xlsx|xls)$/i, '') + '_aggiornato.xlsx',
+           filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
+         });
+       }
 
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(origBuffer);
-      const ws = wb.worksheets[0];
+       if (!outputPath) {
+         toast('Percorso di salvataggio non specificato', 'error');
+         return;
+       }
 
-      const originalRowsCount = await getSetting<number>('pandetta_original_rows_count', 0);
+       setIsSaving(true);
+       toast('Salvataggio in corso...', 'loading');
 
-      rows.forEach((row, ri) => {
-        const isNewRow = row._new || ri >= originalRowsCount;
-        
-        if (!isNewRow) {
-          // Edit existing row - ONLY update values, preserve formatting!
-          const xlRow = ws.getRow(ri + 2);
-          COLS.forEach((col, ci) => {
-             xlRow.getCell(ci + 1).value = row[col];
-             // We no longer overwrite the fill here to preserve original colors
-          });
-        } else {
-          // New row: manual copy of styles from previous row
-          const prevRow = ws.getRow(ws.lastRow ? ws.lastRow.number : ri + 1);
-          const newRowNumber = (ws.lastRow ? ws.lastRow.number : ri + 1) + 1;
-          const newXlRow = ws.getRow(newRowNumber);
+       // Chiama il comando Tauri per salvare via Python
+       const result = await invoke<string>('save_pandetta_command', {
+         params: {
+           data: rows,
+           dynamic_cols: dynamicCols,
+           tecnico_color_map: tecnicoColorMap,
+           original_rows_count: await getSetting<number>('pandetta_original_rows_count', rows.length),
+           original_path: originalPath || outputPath,
+           output_path: outputPath
+         }
+       });
 
-          COLS.forEach((col, ci) => {
-            const cell = newXlRow.getCell(ci + 1);
-            cell.value = row[col];
+       // Aggiorna persistence
+       await saveExcelDataJson('pandetta', rows);
+       if (outputPath !== originalPath) {
+         setOriginalPath(outputPath);
+         if (onFileSelected) onFileSelected(fileName, outputPath);
+       }
 
-            // Copy base style accurately
-            const prevCell = prevRow.getCell(ci + 1);
-            if (prevCell && prevCell.style) {
-              // Note: exceljs handles shared style object references internally
-              cell.style = { ...prevCell.style };
-            }
-
-            // ONLY update tech color if it was specifically mapped
-            if (ci === 19) {
-              const techName = String(row['TECNICO'] || '').trim().toUpperCase();
-              const ts = tecnicoColorMap[techName];
-              if (ts && ts.export) {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + ts.export.replace('#', '') } };
-              }
-            }
-          });
-        }
-      });
-
-      // Clear AutoFilter to prevent Table corruption (Task 43 fix)
-      ws.autoFilter = undefined;
-
-      const buf = await wb.xlsx.writeBuffer();
-      
-      // Update local persistence
-      await saveExcelDataJson('pandetta', rows);
-
-      let userPath = originalPath;
-      if (!userPath) {
-        userPath = await save({
-          defaultPath: fileName.replace(/\.(xlsx|xls)$/i, '') + '_aggiornato.xlsx',
-          filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
-        });
-      }
-
-      if (userPath) {
-        // Now sync is handled directly inside saveExcelFile
-        const fileToSave = new File([buf], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        await saveExcelFile('pandetta', fileToSave, userPath);
-        if (userPath !== originalPath) {
-            setOriginalPath(userPath);
-            if (onFileSelected) onFileSelected(fileName, userPath);
-        }
-        toast('Sincronizzazione completata!', 'success');
-      } else {
-        const fileToSave = new File([buf], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        await saveExcelFile('pandetta', fileToSave, originalPath);
-        toast('Copia aggiornata salvata in locale (AppData)', 'info');
-      }
-    } catch (err: any) {
-      console.error('Export error:', err);
-      toast(`Errore durante l'esportazione: ${err.message}`, 'error');
-    }
-  };
-
-
-  // ── MODAL STATE ──
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalStatus, setModalStatus] = useState<'aperta' | 'chiusa' | 'irreparabile'>('aperta');
-  const [formData, setFormData] = useState<Partial<PandettaRow>>({});
+       setIsSaving(false);
+       toast(result || 'Sincronizzazione completata!', 'success');
+     } catch (err: any) {
+       console.error('Export error:', err);
+       setIsSaving(false);
+       toast(`Errore durante l'esportazione: ${err.message}. Assicurati che Python sia installato.`, 'error');
+     }
+   };
 
   const openNewRow = () => {
     setEditingIdx(null);
     setIsNew(true);
-    const nextRif = Math.max(0, ...rows.filter(r => !r._empty).map(r => parseInt(r['N.RIF PANDETTA']) || 0)) + 1;
-    const emptyRow = {
-      'N.RIF PANDETTA': nextRif,
+    
+    // Trova la colonna RIF dinamicamente
+    const rifCol = dynamicCols.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA')) 
+                   || dynamicCols.find(c => c.toUpperCase().includes('RIF'))
+                   || 'N.RIF PANDETTA';
+    
+    const nextRif = Math.max(0, ...rows.filter(r => !r._empty).map(r => {
+      const val = r[rifCol];
+      return val != null ? parseInt(String(val)) || 0 : 0;
+    })) + 1;
+    
+    const emptyRow: Partial<PandettaRow> = {
+      [rifCol]: nextRif,
       _status: 'aperta',
       _empty: false,
       _new: true
-    } as Partial<PandettaRow>;
-    COLS.forEach(c => {
-      if (!(c in emptyRow)) emptyRow[c] = null;
+    };
+    
+    dynamicCols.forEach(col => {
+      if (!(col in emptyRow)) emptyRow[col] = null;
     });
+    
     setFormData(emptyRow);
     setModalStatus('aperta');
     setModalOpen(true);
@@ -475,9 +526,7 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
     setModalOpen(true);
   };
 
-  // ── RENDER HELPERS ──
-  // (helpers removed for brevity; will be re-added with table implementation)
-
+  // Derived
   const stats = {
     all: rows.filter(r => !r._empty).length,
     aperta: rows.filter(r => r._status === 'aperta' && !r._empty).length,
@@ -488,7 +537,18 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
   const tecnici = [...new Set(rows.filter(r => !r._empty).map(r => (r['TECNICO'] || '').trim()).filter(Boolean))];
   const visibleRows = getVisibleRows();
 
-  // ── UPLOAD HANDLER ──
+  // Ordina colonne: N.RIF PANDETTA per primo se presente
+  const tableCols = useMemo(() => {
+    if (dynamicCols.length === 0) return [];
+    const rifCol = dynamicCols.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA'));
+    if (rifCol) {
+      return [rifCol, ...dynamicCols.filter(c => c !== rifCol)];
+    }
+    return dynamicCols;
+  }, [dynamicCols]);
+
+  const getColLabel = (col: string) => COL_LABELS_MAP[col] || col;
+
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
       handleFile(e.target.files[0]);
@@ -496,6 +556,9 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
     }
   };
 
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalStatus, setModalStatus] = useState<'aperta' | 'chiusa' | 'irreparabile'>('aperta');
+  const [formData, setFormData] = useState<Partial<PandettaRow>>({});
 
   // ── UI ──
   if (view === 'upload') {
@@ -641,10 +704,11 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
 
         <button
           onClick={exportXlsx}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
+          disabled={isSaving}
+          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
         >
-          <Download className="w-4 h-4" />
-          Esporta Excel
+          {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+          {isSaving ? 'Salvataggio in corso...' : 'Esporta Excel'}
         </button>
 
         <button
@@ -679,84 +743,84 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
         <table className="w-full text-sm text-left">
             <thead className="sticky top-0 bg-neutral-100 dark:bg-neutral-700 z-10">
               <tr>
-                {TABLE_COLS.map(col => (
+                {tableCols.map(col => (
                   <th
                     key={col}
-                  onClick={() => {
-                    if (sortCol === col) {
-                      setSortDir(prev => (prev === 1 ? -1 : 1));
-                    } else {
-                      setSortCol(col);
-                      setSortDir(1);
-                    }
-                  }}
-                  className="px-4 py-3 font-semibold text-neutral-700 dark:text-neutral-200 border-b border-neutral-200 dark:border-neutral-600 cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-600 select-none whitespace-nowrap align-middle"
-                >
-                  <div className="flex items-center gap-1">
-                    {COL_LABELS[col] || col}
-                    {sortCol === col && (
-                      <span className="text-blue-500">{sortDir === 1 ? '▲' : '▼'}</span>
-                    )}
-                  </div>
+                    onClick={() => {
+                      if (sortCol === col) {
+                        setSortDir(prev => (prev === 1 ? -1 : 1));
+                      } else {
+                        setSortCol(col);
+                        setSortDir(1);
+                      }
+                    }}
+                    className="px-4 py-3 font-semibold text-neutral-700 dark:text-neutral-200 border-b border-neutral-200 dark:border-neutral-600 cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-600 select-none whitespace-nowrap align-middle"
+                  >
+                    <div className="flex items-center gap-1">
+                      {getColLabel(col)}
+                      {sortCol === col && (
+                        <span className="text-blue-500">{sortDir === 1 ? '▲' : '▼'}</span>
+                      )}
+                    </div>
+                  </th>
+                ))}
+                <th className="px-4 py-3 font-semibold text-neutral-700 dark:text-neutral-200 border-b border-neutral-200 dark:border-neutral-600 w-24 align-middle">
+                  Azioni
                 </th>
-              ))}
-              <th className="px-4 py-3 font-semibold text-neutral-700 dark:text-neutral-200 border-b border-neutral-200 dark:border-neutral-600 w-24 align-middle">
-                Azioni
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.length === 0 ? (
-              <tr>
-                <td colSpan={TABLE_COLS.length + 1} className="px-4 py-12 text-center text-neutral-500">
-                  Nessun dato disponibile
-                </td>
               </tr>
-            ) : (
-              visibleRows.map((row) => {
-                const realIdx = rows.findIndex(r => r === row);
-                const status = row._status;
-                const rowStyle = status === 'chiusa' ? 'bg-emerald-50/20 dark:bg-emerald-900/10 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20' :
-                                 status === 'irreparabile' ? 'bg-red-50/20 dark:bg-red-900/10 hover:bg-red-100/40 dark:hover:bg-red-900/20' :
-                                 'bg-amber-50/20 dark:bg-amber-900/10 hover:bg-amber-100/40 dark:hover:bg-amber-900/20';
-                 return (
-                   <tr 
-                     key={realIdx} 
-                     className={`group transition-colors duration-200 cursor-pointer ${rowStyle}`}
-                     onClick={() => openEdit(realIdx)}
-                   >
-                     {TABLE_COLS.map(col => (
-                       <td key={col} className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-600 align-middle whitespace-nowrap">
-                         {String(row[col] || '').trim()}
-                       </td>
-                     ))}
-                    <td className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-600 text-right align-middle">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openEdit(realIdx); }}
-                          className="p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-xl transition-all shadow-sm border border-blue-100 dark:border-blue-800"
-                          title="Modifica"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); deleteRow(realIdx); }}
-                          className="p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-xl transition-all shadow-sm border border-red-100 dark:border-red-800"
-                          title="Elimina"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {visibleRows.length === 0 ? (
+                <tr>
+                  <td colSpan={tableCols.length + 1} className="px-4 py-12 text-center text-neutral-500">
+                    Nessun dato disponibile
+                  </td>
+                </tr>
+              ) : (
+                visibleRows.map((row) => {
+                  const realIdx = rows.findIndex(r => r === row);
+                  const status = row._status;
+                  const rowStyle = status === 'chiusa' ? 'bg-emerald-50/20 dark:bg-emerald-900/10 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20' :
+                                   status === 'irreparabile' ? 'bg-red-50/20 dark:bg-red-900/10 hover:bg-red-100/40 dark:hover:bg-red-900/20' :
+                                   'bg-amber-50/20 dark:bg-amber-900/10 hover:bg-amber-100/40 dark:hover:bg-amber-900/10';
+                   return (
+                     <tr 
+                       key={realIdx} 
+                       className={`group transition-colors duration-200 cursor-pointer ${rowStyle}`}
+                       onClick={() => openEdit(realIdx)}
+                     >
+                       {tableCols.map(col => (
+                         <td key={col} className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-600 align-middle whitespace-nowrap">
+                           {String(row[col] || '').trim()}
+                         </td>
+                       ))}
+                      <td className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-600 text-right align-middle">
+                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openEdit(realIdx); }}
+                            className="p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-xl transition-all shadow-sm border border-blue-100 dark:border-blue-800"
+                            title="Modifica"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteRow(realIdx); }}
+                            className="p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-xl transition-all shadow-sm border border-red-100 dark:border-red-800"
+                            title="Elimina"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
       </div>
 
-      {/* Modal - Modernized Edit Modal */}
+      {/* Modal - Simplified for brevity but will be built dynamically */}
       {modalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 backdrop-blur-sm bg-neutral-900/40 animate-in fade-in duration-300">
           <div className="bg-white dark:bg-neutral-800 rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
@@ -768,9 +832,9 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
                   {isNew ? 'Nuova Assistenza' : 'Modifica Assistenza'}
                 </h3>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-sm text-neutral-500 font-medium">N.RIF PANDETTA:</span>
+                  <span className="text-sm text-neutral-500 font-medium">RIF:</span>
                   <span className="px-2 py-0.5 bg-neutral-100 dark:bg-neutral-700 rounded text-xs font-mono font-bold text-neutral-600 dark:text-neutral-300">
-                    {formData['N.RIF PANDETTA'] || '—'}
+                    {formData['N.RIF PANDETTA'] || formData['N.RIF'] || '—'}
                   </span>
                 </div>
               </div>
@@ -816,13 +880,13 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
 
               {/* Form Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-                {COLS.map(col => {
-                  if (col === 'N.RIF PANDETTA') return null; // Already shown in header
+                {dynamicCols.map(col => {
+                  if (col.toUpperCase() === 'N.RIF PANDETTA' || col.toUpperCase() === 'N.RIF') return null;
 
-                  const label = COL_LABELS[col] || col;
+                  const label = getColLabel(col);
                   const value = formData[col] || '';
 
-                  if (col === 'STATO INTERVENTO') {
+                  if (col.toUpperCase() === 'STATO INTERVENTO') {
                     return (
                       <div key={col} className="flex flex-col gap-1.5">
                         <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">
@@ -842,7 +906,7 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
                     );
                   }
 
-                  if (col === 'ESITO') {
+                  if (col.toUpperCase() === 'ESITO') {
                     return (
                       <div key={col} className="flex flex-col gap-1.5">
                         <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">
@@ -862,7 +926,7 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
                     );
                   }
 
-                  if (col === 'TECNICO') {
+                  if (col.toUpperCase() === 'TECNICO') {
                     return (
                       <div key={col} className="flex flex-col gap-1.5">
                         <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">
@@ -949,12 +1013,14 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
           className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg shadow-lg border-l-4 ${
             toastMsg.type === 'success' ? 'border-l-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-200' :
             toastMsg.type === 'error' ? 'border-l-red-500 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200' :
+            toastMsg.type === 'loading' ? 'border-l-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200' :
             'border-l-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200'
           } transition-all duration-300 animate-in slide-in-from-bottom-5 fade-in`}
         >
           <div className="flex items-center gap-2">
             {toastMsg.type === 'success' && <CheckCircle className="w-4 h-4" />}
             {toastMsg.type === 'error' && <AlertCircle className="w-4 h-4" />}
+            {toastMsg.type === 'loading' && <Loader2 className="w-4 h-4 animate-spin" />}
             {toastMsg.type === 'info' && <Clock className="w-4 h-4" />}
             <span className="text-sm font-medium">{toastMsg.text}</span>
           </div>
@@ -963,18 +1029,3 @@ export default function PandettaManager({ onFileSelected, className = '' }: Pand
     </div>
   );
 }
-
-// ── DATE UTILS ──
-// function italianToISO(d: string): string {
-//   if (!d || d === '//' || d === '—') return '';
-//   const m = String(d).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-//   if (!m) return '';
-//   return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-// }
-
-// function ISOToItalian(d: string): string {
-//   if (!d) return '';
-//   const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-//   if (!m) return d;
-//   return `${m[3]}/${m[2]}/${m[1]}`;
-// }
