@@ -21,7 +21,7 @@ TECNICO_COLORS = {
         'font': Font(color='FF000000')  # Nero
     },
     'AMARA': {
-        'fill': PatternFill(start_color='FF0000FF', end_color='FF0000FF', fill_type='solid'),  # Blu
+        'fill': PatternFill(start_color='FF4287F5', end_color='FF4287F5', fill_type='solid'),  # Blu
         'font': Font(color='FFFFFFFF')  # Bianco
     }
 }

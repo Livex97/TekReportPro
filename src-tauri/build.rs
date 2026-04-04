@@ -45,11 +45,21 @@ fn compile_python_sidecar() -> Result<(), Box<dyn std::error::Error>> {
     if should_compile {
         println!("cargo:warning=Compilazione sidecar Python in corso (PyInstaller)...");
         
+        // Pulisci prima la cache di PyInstaller per evitare corruzioni (come suggerito dal file genera_binaries.sh)
+        if let Ok(home) = env::var("HOME") {
+            let cache_path = PathBuf::from(home).join("Library/Application Support/pyinstaller");
+            if cache_path.exists() {
+                let _ = fs::remove_dir_all(&cache_path);
+            }
+        }
+        
         fs::create_dir_all(&binaries_dir)?;
 
         // Esegui pyinstaller
         let status = Command::new("pyinstaller")
-            .args(&["--onefile", "--clean", "--distpath", "target/pyinstaller_dist", source_path.to_str().unwrap()])
+            .args(&["--onefile", "--clean", "--noconfirm", "--distpath", "target/pyinstaller_dist", source_path.to_str().unwrap()])
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
             .status()?;
 
         if !status.success() {
