@@ -8,7 +8,7 @@ from openpyxl.utils import column_index_from_string
 STATUS_COLORS = {
     'aperta': PatternFill(start_color='FFFFFF00', end_color='FFFFFF00', fill_type='solid'),  # Giallo
     'chiusa': PatternFill(start_color='FF00B050', end_color='FF00B050', fill_type='solid'),  # Verde
-    'irreparabile': PatternFill(start_color='FFFF0000', end_color='FFFF0000', fill_type='solid'),  # Rosso
+    'negativa': PatternFill(start_color='FFFF0000', end_color='FFFF0000', fill_type='solid'),  # Rosso
 }
 
 TECNICO_COLORS = {
@@ -58,8 +58,11 @@ def derive_status(stato_val, esito_val):
 
     if ('CHIUSO' in stato or 'CHIUSA' in stato) and 'POSITIVO' in esito:
         return 'chiusa'
+    # Se Esito contiene NEGATIVO → negativa (rosso)
+    if 'NEGATIVO' in esito:
+        return 'negativa'
     if 'ANNULLAT' in stato or 'FUORI USO' in stato or 'NON RIPARABILE' in stato or 'IRREPARABILE' in stato or 'ANNULLAT' in esito or 'FUORI USO' in esito:
-        return 'irreparabile'
+        return 'negativa'
     return 'aperta'
 
 def apply_status_color(row_cells, status_value, ws):
@@ -94,7 +97,8 @@ def main():
     with open(json_path, 'r', encoding='utf-8') as f:
         payload = json.load(f)
     
-    data = payload.get('data', [])
+    current_data = payload.get('current_data', [])
+    original_data = payload.get('original_data', [])
     dynamic_cols = payload.get('dynamic_cols')
     original_rows_count = payload.get('original_rows_count')
 
@@ -118,8 +122,8 @@ def main():
         ws = wb.active
 
     if not dynamic_cols:
-        if data:
-            dynamic_cols = [k for k in data[0].keys() if not k.startswith('_')]
+        if current_data:
+            dynamic_cols = [k for k in current_data[0].keys() if not k.startswith('_')]
         else:
             raise ValueError("No columns provided")
 
@@ -152,8 +156,7 @@ def main():
                     if example_row is None:
                         example_row = row
 
-    # Trova il modo di estrarre RIF, STATO INTERVENTO ed ESITO dai dati in JSON,
-    # identificando i nomi esatti delle colonne.
+    # Trova i nomi esatti delle colonne dinamiche
     dynamic_cols_upper = {col.upper(): col for col in dynamic_cols}
     rif_col_name = next((dynamic_cols_upper[k] for k in dynamic_cols_upper if 'RIF' in k), None)
     stato_col_name = next((dynamic_cols_upper[k] for k in dynamic_cols_upper if 'STATO' in k and 'INTERVENTO' in k), None)
@@ -162,9 +165,27 @@ def main():
     esito_col_name = next((dynamic_cols_upper[k] for k in dynamic_cols_upper if 'ESITO' in k), None)
 
     if original_rows_count is None:
-        original_rows_count = len(data)
+        original_rows_count = len(current_data)
 
-    for i, row in enumerate(data):
+    # Raccogli RIF delle righe correnti per individuare eliminazioni
+    current_rifs = set()
+    for row in current_data:
+        if row.get('_empty'):
+            continue
+        rif_val = row.get(rif_col_name) if rif_col_name else None
+        if rif_val is not None:
+            if isinstance(rif_val, float) and rif_val.is_integer():
+                rif_val = int(rif_val)
+            current_rifs.add(str(rif_val).strip())
+
+    # Identifica righe da eliminare (presenti in originale ma non in corrente)
+    rows_to_delete = []
+    for rif_str, r_idx in existing_keys.items():
+        if rif_str not in current_rifs:
+            rows_to_delete.append(r_idx)
+
+    # Processa le righe correnti (aggiorna esistenti o aggiunge nuove)
+    for i, row in enumerate(current_data):
         if row.get('_empty'):
             continue
 
@@ -212,6 +233,14 @@ def main():
             if tecnico_col_idx <= len(target_row):
                 tecnico_cell = target_row[tecnico_col_idx - 1]
                 apply_tecnico_color(tecnico_cell, tecnico_cell.value)
+
+    # Elimina le righe non più presenti (in ordine decrescente per evitare problemi di indice)
+    rows_to_delete.sort(reverse=True)
+    for r_idx in rows_to_delete:
+        try:
+            ws.delete_rows(r_idx)
+        except Exception as e:
+            print(f"Warning: could not delete row {r_idx}: {e}", file=sys.stderr)
 
     # Espandi la tabella per includere le nuove righe se necessario
     if pandetta_table:

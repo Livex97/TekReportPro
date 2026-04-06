@@ -10,7 +10,7 @@ import ExcelJS from 'exceljs';
 // Tipi
 interface PandettaRow {
   [key: string]: any;
-  _status: 'aperta' | 'chiusa' | 'irreparabile';
+  _status: 'aperta' | 'chiusa' | 'negativa';
   _empty: boolean;
   _originalBg?: string | null;
   _new?: boolean;
@@ -73,7 +73,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   const [rows, setRows] = useState<PandettaRow[]>([]);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [isNew, setIsNew] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'aperta' | 'chiusa' | 'irreparabile'>('all');
+  const [filter, setFilter] = useState<'all' | 'aperta' | 'chiusa' | 'negativa'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTecnico, setSelectedTecnico] = useState<string | null>(null);
   const [sortCol, setSortCol] = useState<string | null>(null);
@@ -89,6 +89,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   const [showExternalUpdateBanner, setShowExternalUpdateBanner] = useState(false);
   const [lastNotifiedExternalHash, setLastNotifiedExternalHash] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [originalRows, setOriginalRows] = useState<PandettaRow[]>([]);
   const AUTO_REFRESH_INTERVAL = 8000; // ms
 
   // Calcola hash semplice di un file per rilevare modifiche
@@ -126,6 +127,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
         if (jsonData && jsonData.length > 0) {
           setRows(jsonData);
+          setOriginalRows(jsonData);
           setHasUnsavedChanges(false);
           buildTecnicoColorMap(jsonData);
 
@@ -249,7 +251,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── STATUS DETECTION ──
-  const deriveStatus = useCallback((statoVal: any, esitoVal: any, rowBgRgb: string | null): 'aperta' | 'chiusa' | 'irreparabile' => {
+  const deriveStatus = useCallback((statoVal: any, esitoVal: any, rowBgRgb: string | null): 'aperta' | 'chiusa' | 'negativa' => {
     const stato = String(statoVal || '').trim().toUpperCase();
     const esito = String(esitoVal || '').trim().toUpperCase();
 
@@ -258,14 +260,19 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       return 'chiusa';
     }
 
+    // Se Esito contiene NEGATIVO → negativa (rosso)
+    if (esito.includes('NEGATIVO')) {
+      return 'negativa';
+    }
+
     if (stato.includes('ANNULLAT') || stato.includes('FUORI USO')
-      || stato.includes('NON RIPARABILE') || stato.includes('IRREPARABILE')
+      || stato.includes('NON RIPARABILE') || stato.includes('NEGATIV')
       || esito.includes('ANNULLAT') || esito.includes('FUORI USO')) {
-      return 'irreparabile';
+      return 'negativa';
     }
 
     if (rowBgRgb === 'FF00B050' || rowBgRgb === '00B050') return 'chiusa';
-    if (rowBgRgb === 'FFFF0000' || rowBgRgb === 'FF0000') return 'irreparabile';
+    if (rowBgRgb === 'FFFF0000' || rowBgRgb === 'FF0000') return 'negativa';
 
     return 'aperta';
   }, []);
@@ -459,6 +466,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     }
 
     setRows(newRows);
+    setOriginalRows(newRows);
     setHasUnsavedChanges(false);
     buildTecnicoColorMap(newRows);
 
@@ -514,10 +522,11 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       // Chiama il comando Tauri per salvare via Python
       const result = await invoke<string>('save_pandetta_command', {
         params: {
-          data: rows,
+          current_data: rows,
+          original_data: originalRows,
           dynamic_cols: dynamicCols,
           tecnico_color_map: tecnicoColorMap,
-          original_rows_count: await getSetting<number>('pandetta_original_rows_count', rows.length),
+          original_rows_count: originalRows.length,
           original_path: originalPath || outputPath,
           output_path: outputPath
         }
@@ -525,6 +534,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
       // Aggiorna persistence
       await saveExcelDataJson('pandetta', rows);
+      setOriginalRows([...rows]); // Aggiorna snapshot originale
       if (outputPath !== originalPath) {
         setOriginalPath(outputPath);
         if (onFileSelected) onFileSelected(fileName, outputPath);
@@ -585,6 +595,12 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   };
 
   const saveRow = () => {
+    // Validazione: Stato Intervento obbligatorio se presente nel form
+    if (statoColName && !formData[statoColName]) {
+      toast('Il campo Stato Intervento è obbligatorio', 'error');
+      return;
+    }
+
     const newRow: PandettaRow = {
       ...formData as Record<string, any>,
       _status: modalStatus,
@@ -645,7 +661,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     all: rows.filter(r => !r._empty).length,
     aperta: rows.filter(r => r._status === 'aperta' && !r._empty).length,
     chiusa: rows.filter(r => r._status === 'chiusa' && !r._empty).length,
-    irreparabile: rows.filter(r => r._status === 'irreparabile' && !r._empty).length,
+    negativa: rows.filter(r => r._status === 'negativa' && !r._empty).length,
   };
 
   const tecnici = [...new Set(rows.filter(r => !r._empty).map(r => (r['TECNICO'] || '').trim()).filter(Boolean))];
@@ -663,6 +679,15 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
   const getColLabel = (col: string) => COL_LABELS_MAP[col] || col;
 
+  const statoColName = useMemo(() =>
+    dynamicCols.find(c => c.toUpperCase().includes('STATO') && c.toUpperCase().includes('INTERVENTO')) || '',
+    [dynamicCols]
+  );
+  const esitoColName = useMemo(() =>
+    dynamicCols.find(c => c.toUpperCase().includes('ESITO')) || '',
+    [dynamicCols]
+  );
+
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
       handleFile(e.target.files[0]);
@@ -671,7 +696,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   };
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalStatus, setModalStatus] = useState<'aperta' | 'chiusa' | 'irreparabile'>('aperta');
+  const [modalStatus, setModalStatus] = useState<'aperta' | 'chiusa' | 'negativa'>('aperta');
   const [formData, setFormData] = useState<Partial<PandettaRow>>({});
 
   // ── UI ──
@@ -764,9 +789,9 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
         </div>
       )}
 
-       {/* Top Bar */}
-       <div className="flex items-center gap-4 p-4 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-neutral-200 dark:border-neutral-700">
-         <div className="flex items-center gap-2">
+      {/* Top Bar */}
+      <div className="flex items-center gap-4 p-4 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-neutral-200 dark:border-neutral-700">
+        <div className="flex items-center gap-2">
           <FileSpreadsheet className="w-6 h-6 text-blue-600" />
           <span className="px-2 py-1 text-xs font-mono bg-neutral-100 dark:bg-neutral-700 rounded text-neutral-600 dark:text-neutral-300">
             {fileName}
@@ -786,7 +811,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
             { key: 'all', label: 'Tutte', color: 'text-neutral-600 dark:text-neutral-400 border-neutral-300 dark:border-neutral-600' },
             { key: 'aperta', label: 'Aperte', color: 'text-amber-600 border-amber-500' },
             { key: 'chiusa', label: 'Chiuse', color: 'text-emerald-600 border-emerald-500' },
-            { key: 'irreparabile', label: 'Irreparabili', color: 'text-red-600 border-red-500' }
+            { key: 'negativa', label: 'Negative', color: 'text-red-600 border-red-500' }
           ].map(f => (
             <button
               key={f.key}
@@ -918,7 +943,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       {/* Table */}
       <div className="flex-1 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-neutral-200 dark:border-neutral-700 overflow-auto">
         <table className="w-full text-sm text-left">
-          <thead className="sticky top-0 bg-neutral-100 dark:bg-neutral-700 z-10">
+          <thead className="sticky top-0 bg-neutral-100 dark:bg-neutral-700">
             <tr>
               {tableCols.map(col => (
                 <th
@@ -958,7 +983,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
                 const realIdx = rows.findIndex(r => r === row);
                 const status = row._status;
                 const rowStyle = status === 'chiusa' ? 'bg-emerald-50/90 dark:bg-emerald-900/40 hover:bg-emerald-100/100 dark:hover:bg-emerald-900/80' :
-                  status === 'irreparabile' ? 'bg-red-50/90 dark:bg-red-900/40 hover:bg-red-100/100 dark:hover:bg-red-900/80' :
+                  status === 'negativa' ? 'bg-red-50/90 dark:bg-red-900/40 hover:bg-red-100/100 dark:hover:bg-red-900/80' :
                     'bg-yellow-50/100 dark:bg-yellow-900/60 hover:bg-yellow-100/100 dark:hover:bg-yellow-900/100';
                 return (
                   <tr
@@ -1035,7 +1060,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
                   {[
                     { id: 'aperta', label: 'Aperta', icon: Clock, color: 'amber' },
                     { id: 'chiusa', label: 'Chiusa', icon: CheckCircle, color: 'emerald' },
-                    { id: 'irreparabile', label: 'Irreparabile', icon: AlertCircle, color: 'red' }
+                    { id: 'negativa', label: 'Negativa', icon: AlertCircle, color: 'red' }
                   ].map((s) => (
                     <button
                       key={s.id}
@@ -1063,42 +1088,61 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
                   const label = getColLabel(col);
                   const value = formData[col] || '';
 
-                  if (col.toUpperCase() === 'STATO INTERVENTO') {
+                  if (col === statoColName) {
                     return (
                       <div key={col} className="flex flex-col gap-1.5">
                         <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">
-                          {label}
+                          {label} *
                         </label>
-                        <select
+                        <input
+                          list="stato-intervento-datalist"
                           value={value}
-                          onChange={(e) => setFormData({ ...formData, [col]: e.target.value })}
+                          onChange={(e) => {
+                            const newVal = e.target.value;
+                            setFormData({ ...formData, [col]: newVal });
+                            // Deriva lo stato in base a Stato Intervento e Esito
+                            const esitoVal = formData[esitoColName] || '';
+                            const newStatus = deriveStatus(newVal, esitoVal, null);
+                            setModalStatus(newStatus);
+                          }}
+                          required
                           className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none"
-                        >
-                          <option value="">Seleziona...</option>
-                          {['APERTO', 'CHIUSO', 'ANNULLATO', 'FUORI USO', 'IRREPARABILE', 'NON RIPARABILE'].map(opt => (
-                            <option key={opt} value={opt}>{opt}</option>
+                          placeholder="Es. APERTO, CHIUSO..."
+                        />
+                        <datalist id="stato-intervento-datalist">
+                          {['APERTO', 'CHIUSO', 'ANNULLATO', 'FUORI USO', 'NEGATIVA', 'NON RIPARABILE'].map(opt => (
+                            <option key={opt} value={opt} />
                           ))}
-                        </select>
+                        </datalist>
                       </div>
                     );
                   }
 
-                  if (col.toUpperCase() === 'ESITO') {
+                  if (col === esitoColName) {
                     return (
                       <div key={col} className="flex flex-col gap-1.5">
                         <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">
                           {label}
                         </label>
-                        <select
+                        <input
+                          list="esito-datalist"
                           value={value}
-                          onChange={(e) => setFormData({ ...formData, [col]: e.target.value })}
+                          onChange={(e) => {
+                            const newVal = e.target.value;
+                            setFormData({ ...formData, [col]: newVal });
+                            // Deriva lo stato in base a Stato Intervento e Esito
+                            const statoVal = formData[statoColName] || '';
+                            const newStatus = deriveStatus(statoVal, newVal, null);
+                            setModalStatus(newStatus);
+                          }}
                           className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none"
-                        >
-                          <option value="">Seleziona...</option>
+                          placeholder="Es. POSITIVO, NEGATIVO..."
+                        />
+                        <datalist id="esito-datalist">
                           {['POSITIVO', 'NEGATIVO', 'ANNULLATO'].map(opt => (
-                            <option key={opt} value={opt}>{opt}</option>
+                            <option key={opt} value={opt} />
                           ))}
-                        </select>
+                        </datalist>
                       </div>
                     );
                   }
@@ -1155,10 +1199,10 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
             <div className="px-8 py-6 border-t border-neutral-100 dark:border-neutral-700 flex justify-between items-center bg-neutral-50/50 dark:bg-neutral-800/50">
               <div>
                 {!isNew && (
-                   <button
-                     onClick={() => deleteRow(editingIdx!, true)}
-                     className="flex items-center gap-2 px-5 py-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-2xl transition-all font-bold text-sm"
-                   >
+                  <button
+                    onClick={() => deleteRow(editingIdx!, true)}
+                    className="flex items-center gap-2 px-5 py-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-2xl transition-all font-bold text-sm"
+                  >
                     <Trash2 className="w-4 h-4" />
                     Elimina Record
                   </button>

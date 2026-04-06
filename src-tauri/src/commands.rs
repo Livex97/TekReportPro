@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize)]
 pub struct SavePandettaParams {
-    pub data: serde_json::Value,
+    pub current_data: serde_json::Value,
+    pub original_data: serde_json::Value,
     pub dynamic_cols: Vec<String>,
     pub tecnico_color_map: std::collections::HashMap<String, serde_json::Value>,
     pub original_rows_count: usize,
@@ -91,7 +92,8 @@ pub async fn save_pandetta_command(
     // Crea JSON payload temporaneo
     let mut json_file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
     let payload = serde_json::json!({
-        "data": params.data,
+        "current_data": params.current_data,
+        "original_data": params.original_data,
         "dynamic_cols": params.dynamic_cols,
         "tecnico_color_map": params.tecnico_color_map,
         "original_rows_count": params.original_rows_count,
