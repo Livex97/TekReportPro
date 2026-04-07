@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, Sun, Moon, Plus, Trash2, Brain, Database, Bell, RefreshCw, Layout, Save, RotateCcw, Server, X, FileSpreadsheet } from 'lucide-react';
+import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, Sun, Moon, Plus, Trash2, Brain, Database, Bell, RefreshCw, Layout, Save, RotateCcw, Server, X, FileSpreadsheet, Calendar, Cloud, AlertCircle, ExternalLink } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { open, save, ask, message } from '@tauri-apps/plugin-dialog';
 import { readFile, writeTextFile } from '@tauri-apps/plugin-fs';
@@ -10,15 +10,16 @@ import { extractFieldsFromDocx, extractTextFromDocx } from './utils/docxParser';
 import type { FormField } from './utils/docxParser';
 import { autoFillFields, extractTextFromPdf } from './utils/pdfParser';
 import { generateDocx } from './utils/documentGenerator';
-import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath, getSavePath, setSavePath, getNextDocNumber, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS, getUpdateSettings, setUpdateSettings, checkForUpdates, installUpdate, getCurrentVersion, type UpdateSettings, DEFAULT_UPDATE_SETTINGS, getSectionDefinitions, setSectionDefinitions, type SectionDefinition, DEFAULT_SECTIONS, exportAllSettings, importAllSettings, resetAllSettings, getExcelFileName, getExcelFilePath, clearExcelFile } from './utils/storage';
+import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath, getSavePath, setSavePath, getNextDocNumber, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS, getUpdateSettings, setUpdateSettings, checkForUpdates, installUpdate, getCurrentVersion, type UpdateSettings, DEFAULT_UPDATE_SETTINGS, getSectionDefinitions, setSectionDefinitions, type SectionDefinition, DEFAULT_SECTIONS, exportAllSettings, importAllSettings, resetAllSettings, getExcelFileName, getExcelFilePath, clearExcelFile, getGoogleSettings, setGoogleSettings, type GoogleCalendarSettings } from './utils/storage';
 import { sendAppNotification } from './utils/notifications';
 import { DEFAULT_SYSTEM_PROMPT } from './utils/ollama';
 import AIExtraction from './AIExtraction';
 import SterlinkManagerPage from './SterlinkManagerPage';
 import PandettaManager from './PandettaManager';
+import CalendarPage from './CalendarPage';
 import './App.css';
 
-type View = 'home' | 'settings' | 'form' | 'download' | 'ai-extraction' | 'sterlink-manager' | 'pandetta-manager';
+type View = 'home' | 'settings' | 'form' | 'download' | 'ai-extraction' | 'sterlink-manager' | 'pandetta-manager' | 'calendar';
 
 function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown }: any) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -64,7 +65,7 @@ const POPULAR_ICONS = [
 ];
 
 function App() {
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'templates' | 'ai' | 'advanced' | 'managers'>('general');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'templates' | 'ai' | 'advanced' | 'managers' | 'sync'>('general');
   const [isIconPickerOpen, setIsIconPickerOpen] = useState<number | null>(null);
 
   const [currentView, setCurrentView] = useState<View>('home');
@@ -98,6 +99,10 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [sectionDefinitions, setSectionDefinitionsState] = useState<SectionDefinition[]>(DEFAULT_SECTIONS);
   const [isSectionsSaved, setIsSectionsSaved] = useState(false);
+  const [googleSettings, setGoogleSettingsState] = useState<GoogleCalendarSettings | null>(null);
+  const [isGoogleSaved, setIsGoogleSaved] = useState(false);
+  const [googleAuthCode, setGoogleAuthCode] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
   const [pandettaFileName, setPandettaFileName] = useState<string | null>(null);
   const [pandettaFilePath, setPandettaFilePath] = useState<string | null>(null);
   const [sterlinkFileName, setSterlinkFileName] = useState<string | null>(null);
@@ -183,10 +188,11 @@ function App() {
     const pPath = await getExcelFilePath('pandetta');
     setPandettaFilePath(pPath || null);
 
-    const sFile = await getExcelFileName('sterlink');
-    setSterlinkFileName(sFile || null);
     const sPath = await getExcelFilePath('sterlink');
     setSterlinkFilePath(sPath || null);
+
+    const gSettings = await getGoogleSettings();
+    setGoogleSettingsState(gSettings);
   };
 
   // Task 8: Drag and Drop Listeners
@@ -755,6 +761,71 @@ function App() {
     await navigateView('home');
   };
 
+  useEffect(() => {
+    import('./utils/syncManager').then(m => {
+      if (googleSettings?.enabled && googleSettings?.refreshToken) {
+        m.startAutoSync();
+      } else {
+        m.stopAutoSync();
+      }
+    });
+    return () => {
+      import('./utils/syncManager').then(m => m.stopAutoSync());
+    };
+  }, [googleSettings?.enabled, googleSettings?.refreshToken]);
+
+  const handleGoogleAuth = () => {
+    if (!googleSettings?.clientId) return;
+    import('./utils/googleCalendar').then(m => {
+      const url = m.getGoogleAuthUrl(googleSettings.clientId);
+      window.open(url);
+    });
+  };
+
+  const handleVerifyGoogleCode = async () => {
+    if (!googleAuthCode || !googleSettings?.clientId || !googleSettings?.clientSecret) {
+      return;
+    }
+    
+    setIsProcessing(true);
+    try {
+      const { getTokensFromCode } = await import('./utils/googleCalendar');
+      const tokens = await getTokensFromCode(googleAuthCode, googleSettings.clientId, googleSettings.clientSecret);
+      
+      const updatedSettings = {
+        ...googleSettings,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiryDate: tokens.expiryDate,
+        lastSync: new Date().toISOString()
+      };
+      
+      setGoogleSettingsState(updatedSettings);
+      await setGoogleSettings(updatedSettings);
+      setGoogleAuthCode('');
+      setIsGoogleSaved(true);
+      setTimeout(() => setIsGoogleSaved(false), 3000);
+    } catch (e: any) {
+      await message(e.message || "Errore durante l'autorizzazione", { title: 'Errore Sync', kind: 'error' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    if (!googleSettings?.enabled || !googleSettings?.refreshToken) return;
+    setIsSyncing(true);
+    try {
+      const { performSync } = await import('./utils/syncManager');
+      await performSync(googleSettings);
+      // Reload events if on calendar view or updated via storage listener
+    } catch (e) {
+      console.error('Manual sync failed:', e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleGenerate = () => {
     if (!templateFile) return;
     setCurrentView('download');
@@ -1000,6 +1071,17 @@ function App() {
               >
                 <FileSpreadsheet className="w-6 h-6" />
               </button>
+               <button
+                onClick={() => navigateView('calendar')}
+                className={`p-2 transition-colors rounded-lg ${
+                  currentView === 'calendar'
+                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
+                }`}
+                title="Calendario Lavori"
+              >
+                <Calendar className="w-6 h-6" />
+              </button>
                 <button
                   onClick={() => navigateView('settings')}
                   className={`p-2 transition-colors rounded-lg ${
@@ -1023,7 +1105,7 @@ function App() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 ${['pandetta-manager', 'sterlink-manager', 'calendar'].includes(currentView) ? 'h-[calc(100vh-4rem)] p-0 pt-8' : 'py-8'}`}>
 
         {/* --- VIEW: HOME --- */}
         {currentView === 'home' && (
@@ -1108,6 +1190,7 @@ function App() {
                 { id: 'managers', label: 'Database & Manager', icon: <Database className="w-4 h-4" /> },
                 { id: 'templates', label: 'Template & Sezioni', icon: <Layout className="w-4 h-4" /> },
                 { id: 'ai', label: 'IA & Analisi', icon: <Brain className="w-4 h-4" /> },
+                { id: 'sync', label: 'Sincronizzazione', icon: <Cloud className="w-4 h-4" /> },
                 { id: 'advanced', label: 'Sistema & Dati', icon: <Server className="w-4 h-4" /> }
               ].map(tab => (
                 <button
@@ -1745,6 +1828,201 @@ function App() {
                   </div>
                 </div>
               </>
+            )}
+
+            {/* --- TAB: GOOGLE SYNC --- */}
+            {activeSettingsTab === 'sync' && (
+              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                  <div className="flex items-center justify-between mb-8">
+                    <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl flex items-center justify-center border border-emerald-100 dark:border-emerald-800 shadow-sm">
+                        <Cloud className="w-7 h-7 text-emerald-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-black text-neutral-900 dark:text-white">Sincronizzazione Google Calendar</h3>
+                        <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Configura le chiavi API per mantenere sincronizzati i tuoi lavori.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {googleSettings?.refreshToken && (
+                        <button
+                          onClick={handleManualSync}
+                          disabled={isSyncing}
+                          className={`px-4 py-3 font-bold rounded-xl transition-all duration-300 flex items-center gap-2 text-sm border-2
+                            ${isSyncing ? 'bg-neutral-50 text-neutral-400 border-neutral-100' : 'bg-white text-neutral-600 border-neutral-100 hover:border-emerald-500 hover:text-emerald-600'}`}
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                          Forza Sincronizzazione
+                        </button>
+                      )}
+                      <button
+                        onClick={async () => {
+                          if (googleSettings) {
+                            setIsProcessing(true);
+                            await setGoogleSettings(googleSettings);
+                            setIsProcessing(false);
+                            setIsGoogleSaved(true);
+                            setTimeout(() => setIsGoogleSaved(false), 3000);
+                          }
+                        }}
+                        className={`px-6 py-3 font-black rounded-xl transition-all duration-300 flex items-center gap-2 text-sm shadow-lg
+                        ${isGoogleSaved
+                            ? 'bg-emerald-600 text-white shadow-emerald-500/20'
+                            : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/20 active:scale-95'}`}
+                      >
+                        {isGoogleSaved ? (
+                          <>
+                            <CheckCircle className="w-4 h-4" />
+                            Salvato!
+                          </>
+                        ) : (
+                          <>
+                            <Save className="w-4 h-4" />
+                            Salva Impostazioni
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-6 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-3xl">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all shadow-sm ${googleSettings?.enabled && googleSettings?.refreshToken ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600' : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400'}`}>
+                          <RefreshCw className={`w-6 h-6 ${googleSettings?.enabled && googleSettings?.refreshToken ? 'animate-spin-slow' : ''}`} />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-black text-neutral-900 dark:text-white">Sincronizzazione Automatica</h4>
+                          <p className={`text-xs font-bold ${googleSettings?.refreshToken ? 'text-emerald-600' : 'text-neutral-500'}`}>
+                            {googleSettings?.refreshToken ? 'App autorizzata e pronta.' : 'Richiede autorizzazione.'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (googleSettings) {
+                            setGoogleSettingsState({ ...googleSettings, enabled: !googleSettings.enabled });
+                          }
+                        }}
+                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all focus:outline-none shadow-inner
+                        ${googleSettings?.enabled ? 'bg-emerald-600' : 'bg-neutral-300 dark:bg-neutral-700'}`}
+                      >
+                        <span
+                          className={`inline-block h-5 w-5 transform rounded-full bg-white transition-all shadow-md
+                          ${googleSettings?.enabled ? 'translate-x-6' : 'translate-x-1'}`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest ml-1">Google Client ID</label>
+                        <input
+                          type="password"
+                          value={googleSettings?.clientId || ''}
+                          onChange={(e) => setGoogleSettingsState(googleSettings ? { ...googleSettings, clientId: e.target.value } : null)}
+                          placeholder="Inserisci il tuo Client ID"
+                          className="w-full px-5 py-3.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl outline-none focus:border-primary-500 dark:focus:border-primary-500 text-neutral-800 dark:text-white font-mono text-xs shadow-inner transition-all"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest ml-1">Google Client Secret</label>
+                        <input
+                          type="password"
+                          value={googleSettings?.clientSecret || ''}
+                          onChange={(e) => setGoogleSettingsState(googleSettings ? { ...googleSettings, clientSecret: e.target.value } : null)}
+                          placeholder="Inserisci il tuo Client Secret"
+                          className="w-full px-5 py-3.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl outline-none focus:border-primary-500 dark:focus:border-primary-500 text-neutral-800 dark:text-white font-mono text-xs shadow-inner transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Step de Autenticazione */}
+                    {!googleSettings?.refreshToken ? (
+                      <div className="p-8 bg-primary-50/30 dark:bg-primary-900/10 rounded-3xl border border-primary-100 dark:border-primary-800/50">
+                        <div className="flex flex-col md:flex-row items-center gap-8">
+                          <div className="flex-1 space-y-4">
+                            <h4 className="text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
+                              <LucideIcons.Lock className="w-5 h-5 text-primary-600" />
+                              Autorizzazione Necessaria
+                            </h4>
+                            <p className="text-sm text-neutral-500 dark:text-neutral-400 leading-relaxed font-medium">
+                              Per collegare il tuo account, dopo aver salvato il Client ID e Secret:
+                              <br />
+                              1. Clicca su <strong>"Autorizza App"</strong>
+                              <br />
+                              2. Accetta le autorizzazioni nel browser
+                              <br />
+                              3. Copia il codice fornito e incollalo qui sotto
+                            </p>
+                            <button
+                              onClick={handleGoogleAuth}
+                              disabled={!googleSettings?.clientId || !googleSettings?.clientSecret}
+                              className="px-6 py-3 bg-white dark:bg-neutral-800 border-2 border-primary-200 text-primary-600 font-black rounded-xl hover:bg-primary-50 transition-all disabled:opacity-30 flex items-center gap-2 shadow-sm"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                              Autorizza App
+                            </button>
+                          </div>
+                          <div className="w-full md:w-1/2 space-y-3">
+                            <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Incolla qui il codice di autorizzazione</label>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={googleAuthCode}
+                                onChange={(e) => setGoogleAuthCode(e.target.value)}
+                                placeholder="Codice Google..."
+                                className="flex-1 px-5 py-3.5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl outline-none focus:border-emerald-500 text-xs font-mono"
+                              />
+                              <button
+                                onClick={handleVerifyGoogleCode}
+                                disabled={!googleAuthCode || isProcessing}
+                                className="px-5 bg-emerald-600 text-white font-black rounded-2xl hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                              >
+                                Verifica
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-6 bg-emerald-50/50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800/50 rounded-3xl flex items-center justify-between">
+                         <div className="flex items-center gap-4">
+                           <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/40 rounded-2xl flex items-center justify-center text-emerald-600">
+                             <CheckCircle className="w-6 h-6" />
+                           </div>
+                           <div>
+                             <h4 className="text-sm font-black text-neutral-900 dark:text-white">Account Collegato Correttamente</h4>
+                             <p className="text-xs font-bold text-emerald-600/80">Ultima sincronizzazione: {googleSettings.lastSync ? new Date(googleSettings.lastSync).toLocaleString('it-IT') : 'Nessuna'}</p>
+                           </div>
+                         </div>
+                         <button
+                           onClick={async () => {
+                             const confirmed = await ask("Vuoi davvero scollegare l'account Google? I dati locali rimarranno intatti ma la sincronizzazione si fermerà.", { title: 'Scollega Account', kind: 'warning' });
+                             if (confirmed) {
+                               const reset = { ...googleSettings, refreshToken: '', accessToken: '', expiryDate: 0, enabled: false };
+                               setGoogleSettingsState(reset);
+                               await setGoogleSettings(reset);
+                             }
+                           }}
+                           className="text-xs font-black text-red-500 hover:text-red-600 transition-colors bg-white dark:bg-neutral-800 px-4 py-2 rounded-xl border border-red-100 dark:border-red-900/30"
+                         >
+                           Scollega Account
+                         </button>
+                      </div>
+                    )}
+
+                    <div className="flex items-start gap-3 p-4 bg-yellow-50/50 dark:bg-yellow-900/10 border border-yellow-100 dark:border-yellow-800/30 rounded-2xl">
+                      <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 shrink-0" />
+                      <p className="text-[10px] font-bold text-yellow-800/80 dark:text-yellow-500/80 leading-relaxed">
+                        Nota: Assicurati che l'app sia in modalità "Produzione" nella Console Google per evitare che i token scadano dopo 7 giorni. 
+                        In alternativa, aggiungi il tuo indirizzo email come "Test User".
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {activeSettingsTab === 'advanced' && (
@@ -2394,6 +2672,11 @@ function App() {
                 }}
               />
             </div>
+          )}
+
+          {/* --- VIEW: CALENDAR --- */}
+          {currentView === 'calendar' && (
+            <CalendarPage theme={theme} />
           )}
        </main>
 

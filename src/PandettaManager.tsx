@@ -762,26 +762,26 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   }
 
   return (
-    <div className={`flex flex-col h-full gap-4 ${className}`}>
+    <div className={`flex flex-col h-full ${className}`}>
       {showExternalUpdateBanner && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-yellow-100 border border-yellow-400 text-yellow-800 p-4 rounded-lg shadow-lg z-50 max-w-md">
+        <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-yellow-100/90 backdrop-blur-md border border-yellow-400 text-yellow-800 p-4 rounded-2xl shadow-2xl z-50 max-w-md animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="flex items-center gap-2 mb-2">
             <AlertCircle className="w-5 h-5" />
-            <span className="font-semibold">File modificato esternamente</span>
+            <span className="font-semibold text-lg">Il file originale è stato modificato</span>
           </div>
-          <p className="text-sm mb-3">
-            Il file Excel originale è stato modificato fuori dall'applicazione. Le modifiche locali non salvate andranno perse. Vuoi ricaricare i dati e sincronizzare?
+          <p className="text-sm mb-3 opacity-90">
+            Le modifiche locali potrebbero andare perse. Vuoi ricaricare i dati e sincronizzare?
           </p>
           <div className="flex gap-2">
             <button
               onClick={reloadFromExternal}
-              className="px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-sm font-medium"
+              className="flex-1 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl text-sm font-bold shadow-sm transition-all"
             >
               Ricarica
             </button>
             <button
               onClick={() => setShowExternalUpdateBanner(false)}
-              className="px-3 py-1 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded text-sm font-medium"
+              className="flex-1 px-4 py-2 bg-white/50 hover:bg-white/80 text-yellow-800 rounded-xl text-sm font-bold border border-yellow-300 transition-all"
             >
               Ignora
             </button>
@@ -789,161 +789,168 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
         </div>
       )}
 
-      {/* Top Bar */}
-      <div className="flex items-center gap-4 p-4 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-neutral-200 dark:border-neutral-700">
-        <div className="flex items-center gap-2">
-          <FileSpreadsheet className="w-6 h-6 text-blue-600" />
-          <span className="px-2 py-1 text-xs font-mono bg-neutral-100 dark:bg-neutral-700 rounded text-neutral-600 dark:text-neutral-300">
-            {fileName}
-          </span>
-          {hasUnsavedChanges && (
-            <span className="px-2 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400 rounded-full flex items-center gap-1">
-              <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
-              Modifiche non salvate
+      {/* Sticky Header Wrapper */}
+      <div className="sticky top-16 z-20 flex flex-col gap-4 pt-4 pb-6 bg-transparent -mx-4 px-4 -mt-8 transition-all">
+        {/* Top Bar */}
+        <div className="flex items-center gap-4 p-4 bg-white/80 dark:bg-neutral-800/80 rounded-2xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="w-6 h-6 text-blue-600" />
+            <span className="px-2 py-1 text-xs font-mono bg-neutral-100 dark:bg-neutral-700/50 rounded text-neutral-600 dark:text-neutral-300">
+              {fileName}
             </span>
-          )}
-        </div>
+            {hasUnsavedChanges && (
+              <span className="px-2 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400 rounded-full flex items-center gap-1">
+                <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
+                Modifiche non salvate
+              </span>
+            )}
+          </div>
 
-        <div className="flex-1" />
+          <div className="flex-1" />
 
-        <div className="flex items-center gap-2">
-          {[
-            { key: 'all', label: 'Tutte', color: 'text-neutral-600 dark:text-neutral-400 border-neutral-300 dark:border-neutral-600' },
-            { key: 'aperta', label: 'Aperte', color: 'text-amber-600 border-amber-500' },
-            { key: 'chiusa', label: 'Chiuse', color: 'text-emerald-600 border-emerald-500' },
-            { key: 'negativa', label: 'Negative', color: 'text-red-600 border-red-500' }
-          ].map(f => (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key as any)}
-              className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium border rounded-lg transition-colors ${filter === f.key
-                ? `${f.color} bg-current/10`
-                : 'text-neutral-600 dark:text-neutral-400 border-neutral-300 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700'
-                }`}
-            >
-              {f.key !== 'all' && (
-                <span className={`w-2 h-2 rounded-full ${f.key === 'aperta' ? 'bg-amber-500' :
-                  f.key === 'chiusa' ? 'bg-emerald-500' : 'bg-red-500'
-                  }`} />
-              )}
-              <span className="hidden sm:inline">{f.label}</span> {stats[f.key as keyof typeof stats]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-neutral-200 dark:border-neutral-700">
-        <div className="relative flex-1 min-w-[200px] max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
-          <input
-            type="text"
-            placeholder="Cerca cliente, strumento, stato…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral-50 dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        {searchTerm && (
-          <button
-            onClick={() => { setSearchTerm(''); setFilter('all'); }}
-            className="p-2 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-
-        <div className="h-6 w-px bg-neutral-300 dark:bg-neutral-600" />
-
-        <button
-          onClick={openNewRow}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Nuova riga
-        </button>
-
-        <button
-          onClick={exportXlsx}
-          disabled={isSaving}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-          {isSaving ? 'Salvataggio in corso...' : 'Esporta Excel'}
-        </button>
-
-        <button
-          onClick={async () => {
-            const confirmed = await ask('Vuoi davvero rimuovere il file Excel persistente per Pandetta Manager? Dovrai caricarlo nuovamente per utilizzare la pagina.', {
-              title: 'Ricarica File',
-              kind: 'warning'
-            });
-
-            if (!confirmed) return;
-
-            // Reset completo dello stato locale - eseguito sempre
-            setOriginalPath(null);
-            setFileName('Pandetta_2026.xlsx');
-            setRows([]);
-            setDynamicCols([]);
-            setSelectedTecnico(null);
-            setFilter('all');
-            setSearchTerm('');
-            setView('upload');
-            setHasUnsavedChanges(false);
-
-            try {
-              // Cancella cache locale
-              await clearExcelFile('pandetta');
-              // Resetta stati in App.tsx
-              if (onResetPersistent) await onResetPersistent();
-              toast('Cache rimossa. Carica un nuovo file.', 'info');
-            } catch (err) {
-              console.error('Reset failed:', err);
-              toast('Errore durante la rimozione della cache', 'error');
-            }
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-600 active:bg-neutral-300 dark:active:bg-neutral-600 rounded-lg text-sm font-medium transition-all duration-200 border border-neutral-300 dark:border-neutral-600 hover:border-neutral-400 dark:hover:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-500 cursor-pointer"
-        >
-          <Upload className="w-4 h-4" />
-          Ricarica file
-        </button>
-
-        <div className="h-6 w-px bg-neutral-300 dark:border-neutral-600" />
-
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Tecnici:</span>
-          {tecnici.map(t => {
-            const style = getTecnicoStyle(t);
-            const isSelected = selectedTecnico === t.trim().toUpperCase();
-            return (
+          <div className="flex items-center gap-2">
+            {[
+              { key: 'all', label: 'Tutte', color: 'text-neutral-600 dark:text-neutral-400 border-neutral-300 dark:border-neutral-600' },
+              { key: 'aperta', label: 'Aperte', color: 'text-amber-600 border-amber-500' },
+              { key: 'chiusa', label: 'Chiuse', color: 'text-emerald-600 border-emerald-500' },
+              { key: 'negativa', label: 'Negative', color: 'text-red-600 border-red-500' }
+            ].map(f => (
               <button
-                key={t}
-                onClick={() => {
-                  const normalized = t.trim().toUpperCase();
-                  setSelectedTecnico(prev => prev === normalized ? null : normalized);
-                }}
-                className={`px-2 py-1 text-xs font-bold rounded-full transition-all cursor-pointer ${isSelected ? 'ring-2 ring-offset-1 ring-blue-500 scale-105' : ''
+                key={f.key}
+                onClick={() => setFilter(f.key as any)}
+                className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium border rounded-lg transition-colors ${filter === f.key
+                  ? `${f.color} bg-current/10`
+                  : 'text-neutral-600 dark:text-neutral-400 border-neutral-300 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700'
                   }`}
-                style={{
-                  background: style.bg,
-                  color: style.text,
-                  border: `1px solid ${style.text}40`
-                }}
-                title={`Filtra per ${t}`}
               >
-                {t}
+                {f.key !== 'all' && (
+                  <span className={`w-2 h-2 rounded-full ${f.key === 'aperta' ? 'bg-amber-500' :
+                    f.key === 'chiusa' ? 'bg-emerald-500' : 'bg-red-500'
+                    }`} />
+                )}
+                <span className="hidden sm:inline">{f.label}</span> {stats[f.key as keyof typeof stats]}
               </button>
-            );
-          })}
+            ))}
+          </div>
+        </div>
+
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center gap-3 p-4 bg-white/80 dark:bg-neutral-800/80 rounded-2xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-md">
+          <div className="relative flex-1 min-w-[200px] max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+            <input
+              type="text"
+              placeholder="Cerca cliente, strumento, stato…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-neutral-50 dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {searchTerm && (
+            <button
+              onClick={() => { setSearchTerm(''); setFilter('all'); }}
+              className="p-2 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+
+          <div className="h-6 w-px bg-neutral-300 dark:bg-neutral-600" />
+
+          <button
+            onClick={openNewRow}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Nuova riga
+          </button>
+
+          <button
+            onClick={exportXlsx}
+            disabled={isSaving}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {isSaving ? 'Salvataggio in corso...' : 'Esporta Excel'}
+          </button>
+
+          <button
+            onClick={async () => {
+              const confirmed = await ask('Vuoi davvero rimuovere il file Excel persistente per Pandetta Manager? Dovrai caricarlo nuovamente per utilizzare la pagina.', {
+                title: 'Ricarica File',
+                kind: 'warning'
+              });
+
+              if (!confirmed) return;
+
+              setOriginalPath(null);
+              setFileName('Pandetta_2026.xlsx');
+              setRows([]);
+              setDynamicCols([]);
+              setSelectedTecnico(null);
+              setFilter('all');
+              setSearchTerm('');
+              setView('upload');
+              setHasUnsavedChanges(false);
+
+              try {
+                await clearExcelFile('pandetta');
+                if (onResetPersistent) await onResetPersistent();
+                toast('Cache rimossa. Carica un nuovo file.', 'info');
+              } catch (err) {
+                console.error('Reset failed:', err);
+                toast('Errore durante la rimozione della cache', 'error');
+              }
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-600 active:bg-neutral-300 dark:active:bg-neutral-600 rounded-lg text-sm font-medium transition-all duration-200 border border-neutral-300 dark:border-neutral-600 hover:border-neutral-400 dark:hover:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-400 cursor-pointer"
+          >
+            <Upload className="w-4 h-4" />
+            Ricarica file
+          </button>
+
+          <div className="h-6 w-px bg-neutral-300 dark:border-neutral-600" />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Tecnici:</span>
+            {tecnici.map(t => {
+              const style = getTecnicoStyle(t);
+              const isSelected = selectedTecnico === t.trim().toUpperCase();
+              return (
+                <button
+                  key={t}
+                  onClick={() => {
+                    const normalized = t.trim().toUpperCase();
+                    setSelectedTecnico(prev => prev === normalized ? null : normalized);
+                  }}
+                  className={`px-2 py-1 text-xs font-bold rounded-full transition-all cursor-pointer ${isSelected ? 'ring-2 ring-offset-1 ring-blue-500 scale-105' : ''
+                    }`}
+                  style={{
+                    background: style.bg,
+                    color: style.text,
+                    border: `1px solid ${style.text}40`
+                  }}
+                  title={`Filtra per ${t}`}
+                >
+                  {t}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-neutral-200 dark:border-neutral-700 overflow-auto">
+      {/* Table Section with fade on scroll */}
+      <div className="flex-1 relative overflow-hidden flex flex-col min-h-0">
+        <div 
+          className="flex-1 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 overflow-auto scrollbar-thin scrollbar-thumb-neutral-300 dark:scrollbar-thumb-neutral-600 pb-12"
+          style={{
+            maskImage: 'linear-gradient(to bottom, black, black calc(100% - 4rem), transparent)',
+            WebkitMaskImage: 'linear-gradient(to bottom, black, black calc(100% - 4rem), transparent)',
+          }}
+        >
         <table className="w-full text-sm text-left">
-          <thead className="sticky top-0 bg-neutral-100 dark:bg-neutral-700">
+          <thead className="sticky top-0 bg-neutral-100 dark:bg-neutral-700 z-10 shadow-sm">
             <tr>
               {tableCols.map(col => (
                 <th
@@ -1021,6 +1028,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
           </tbody>
         </table>
       </div>
+    </div>
 
       {/* Modal - Simplified for brevity but will be built dynamically */}
       {modalOpen && (

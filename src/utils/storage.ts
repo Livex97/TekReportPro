@@ -265,6 +265,54 @@ export async function setUpdateSettings(settings: UpdateSettings): Promise<void>
     await setSetting('update_settings', settings);
 }
 
+// ===========================
+// CALENDAR & GOOGLE SYNC (New)
+// ===========================
+
+export interface CalendarEvent {
+    id: string;
+    date: string; // ISO format (YYYY-MM-DD)
+    activity: string;
+    technician: string;
+    startTime?: string; // HH:mm format
+    endTime?: string; // HH:mm format
+    notes?: string;
+    googleEventId?: string; // To correlate with Google Calendar
+}
+
+export interface GoogleCalendarSettings {
+    enabled: boolean;
+    clientId: string;
+    clientSecret: string;
+    accessToken?: string;
+    refreshToken?: string;
+    expiryDate?: number;
+    lastSync?: string;
+}
+
+export const DEFAULT_GOOGLE_SETTINGS: GoogleCalendarSettings = {
+    enabled: false,
+    clientId: '',
+    clientSecret: '',
+    refreshToken: '',
+};
+
+export async function getCalendarEvents(): Promise<CalendarEvent[]> {
+    return await getSetting<CalendarEvent[]>('calendar_events', []);
+}
+
+export async function setCalendarEvents(events: CalendarEvent[]): Promise<void> {
+    await setSetting('calendar_events', events);
+}
+
+export async function getGoogleSettings(): Promise<GoogleCalendarSettings> {
+    return await getSetting<GoogleCalendarSettings>('google_calendar_settings', DEFAULT_GOOGLE_SETTINGS);
+}
+
+export async function setGoogleSettings(settings: GoogleCalendarSettings): Promise<void> {
+    await setSetting('google_calendar_settings', settings);
+}
+
 // Tipo per i dati dell'update ( corrispondente a tauri_plugin_updater::Update )
 export type UpdateInfo = {
     version: string;
