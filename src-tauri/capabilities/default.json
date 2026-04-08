@@ -21,7 +21,8 @@
     "notification:allow-notify",
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",
-     "log:default",
-     "updater:default"
-   ]
+    "log:default",
+    "updater:default",
+    "shell:default"
+  ]
 }

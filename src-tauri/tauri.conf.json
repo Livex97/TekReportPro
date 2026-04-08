@@ -58,7 +58,8 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/save_pandetta"
+      "binaries/save_pandetta",
+      "binaries/save_sterlink"
     ]
   }
 }

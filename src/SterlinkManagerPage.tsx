@@ -1,49 +1,31 @@
-import React, { useState, useEffect, useRef } from 'react';
-import * as XLSX from 'xlsx';
-import ExcelJS from 'exceljs';
-import { Upload, Search, Plus, FileSpreadsheet, X, ArrowLeft, CheckCircle, Save } from 'lucide-react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { FileSpreadsheet, Upload, Search, X, Plus, CheckCircle, AlertCircle, Edit2, Trash2, Loader2, ArrowLeft, Save } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { readFile } from '@tauri-apps/plugin-fs';
-import { saveExcelFile, getExcelFile, getExcelFileBuffer, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting } from './utils/storage';
-
-import { save } from '@tauri-apps/plugin-dialog';
+import { save, open, ask } from '@tauri-apps/plugin-dialog';
+import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting } from './utils/storage';
+import { invoke } from '@tauri-apps/api/core';
+import ExcelJS from 'exceljs';
 
 // --- Types ---
-interface DataRow {
-  _id: number;
-  _new?: boolean;
+interface SterlinkRow {
   [key: string]: any;
+  _empty: boolean;
+  _new?: boolean;
 }
 
 interface SterlinkManagerPageProps {
   onFileSelected?: (name: string, path: string | null) => void;
+  className?: string;
 }
 
 type ViewState = 'upload' | 'table';
-
-interface MultiEntryEditorProps {
-  value: string;
-  onChange?: (val: string) => void;
-}
 
 // --- Global Helpers ---
 function isMultiEntryValue(value: any): boolean {
   if (value === null || value === undefined || value === '') return false;
   const strVal = String(value);
   return /^\d+\.\s/.test(strVal) && (strVal.includes('\n') || strVal.includes('\\n'));
-}
-
-function showToast(msg: string, type: 'success' | 'error' | 'info' = 'info') {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = `toast ${type} animate-in fade-in slide-in-from-right-4 duration-300`;
-  toast.innerHTML = `<span>${type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ'}</span> ${msg}`;
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.classList.add('animate-out', 'fade-out', 'slide-out-to-right-4');
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
 }
 
 function parseMultiEntry(val: string): { idx: number; value: string }[] {
@@ -67,6 +49,11 @@ function formatMultiEntry(entries: { idx: number; value: string }[]): string {
 }
 
 // --- Sub-components ---
+interface MultiEntryEditorProps {
+  value: string;
+  onChange?: (val: string) => void;
+}
+
 function MultiEntryEditor({ value, onChange }: MultiEntryEditorProps) {
   const [entries, setEntries] = useState<{ idx: number; value: string }[]>(() => parseMultiEntry(value));
 
@@ -93,7 +80,7 @@ function MultiEntryEditor({ value, onChange }: MultiEntryEditorProps) {
     <div className="multi-entry-editor flex flex-col gap-3">
       <div className="entries-list flex flex-col gap-2">
         {entries.map((entry, idx) => (
-          <div key={idx} className="entry-edit-slot flex items-center gap-3 p-2 bg-neutral-50 dark:bg-neutral-900/50 rounded-xl border border-neutral-100 dark:border-neutral-800" data-idx={Math.min(idx, 4)}>
+          <div key={idx} className="entry-edit-slot flex items-center gap-3 p-2 bg-neutral-50 dark:bg-neutral-900/50 rounded-xl border border-neutral-100 dark:border-neutral-800">
             <span className="w-6 h-6 flex items-center justify-center bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 rounded-full text-[10px] font-bold">
               {idx + 1}
             </span>
@@ -127,50 +114,78 @@ function MultiEntryEditor({ value, onChange }: MultiEntryEditorProps) {
 }
 
 // --- Main Page ---
-export default function SterlinkManagerPage({ onFileSelected }: SterlinkManagerPageProps) {
+export default function SterlinkManagerPage({ onFileSelected, className = '' }: SterlinkManagerPageProps) {
   const [view, setView] = useState<ViewState>('upload');
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [rows, setRows] = useState<DataRow[]>([]);
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [originalPath, setOriginalPath] = useState<string | null>(null);
-  const [loadedAt, setLoadedAt] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalData, setModalData] = useState<DataRow | null>(null);
-  const [isNewRow, setIsNewRow] = useState(false);
-  const [sortCol, setSortCol] = useState<number | null>(null);
-  const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const [rows, setRows] = useState<SterlinkRow[]>([]);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [isNew, setIsNew] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [modified, setModified] = useState(false);
-  const nextIdRef = useRef(1);
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const [fileName, setFileName] = useState('Sterlink_Installate.xlsx');
+  const [originalPath, setOriginalPath] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' | 'loading' } | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [dynamicCols, setDynamicCols] = useState<string[]>([]);
+  const [originalFileHash, setOriginalFileHash] = useState<string | null>(null);
+  const [showExternalUpdateBanner, setShowExternalUpdateBanner] = useState(false);
+  const [lastNotifiedExternalHash, setLastNotifiedExternalHash] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [originalRows, setOriginalRows] = useState<SterlinkRow[]>([]);
+  const AUTO_REFRESH_INTERVAL = 8000;
 
-  // 1. Initial Data Loading (Once on mount)
+  const calculateFileHash = async (filePath: string): Promise<string | null> => {
+    try {
+      const fileContent = await readFile(filePath);
+      const bytes = new Uint8Array(fileContent);
+      let hash = 0;
+      for (let i = 0; i < bytes.length; i++) {
+        hash = ((hash << 5) - hash) + bytes[i];
+        hash |= 0;
+      }
+      return `${hash}-${bytes.length}`;
+    } catch (err) {
+      console.error('Error calculating file hash:', err);
+      return null;
+    }
+  };
+
   useEffect(() => {
     const loadPersistentData = async () => {
       try {
         const jsonData = await getExcelDataJson('sterlink');
         const path = await getExcelFilePath('sterlink');
         const name = await getExcelFileName('sterlink');
-        const headersMeta = await getSetting<string[]>('sterlink_headers', []);
-        
-        if (path) setOriginalPath(path);
+
+        if (path) {
+          setOriginalPath(path);
+          const hash = await calculateFileHash(path);
+          if (hash) setOriginalFileHash(hash);
+        }
         if (name) setFileName(name);
-        
-        if (jsonData && jsonData.length > 0 && headersMeta.length > 0) {
+
+        if (jsonData && jsonData.length > 0) {
           setRows(jsonData);
-          setHeaders(headersMeta);
+          setOriginalRows(jsonData);
+          setHasUnsavedChanges(false);
+
+          const savedCols = await getSetting<string[]>('sterlink_dynamic_cols', []);
+          if (savedCols.length > 0) {
+            setDynamicCols(savedCols);
+          } else {
+            const cols = Object.keys(jsonData[0]).filter(k => !k.startsWith('_'));
+            setDynamicCols(cols);
+          }
           setView('table');
-          setLoadedAt(new Date().toLocaleString('it-IT'));
-          // Find max ID
-          const maxId = jsonData.reduce((max, r) => Math.max(max, r._id || 0), 0);
-          nextIdRef.current = maxId + 1;
         } else {
-          // Fallback to Excel if JSON not found but Excel index is
           const file = await getExcelFile('sterlink');
           if (file) {
             const buffer = await file.arrayBuffer();
-            parseExcel(buffer, file.name);
+            const wb = new ExcelJS.Workbook();
+            await wb.xlsx.load(buffer);
+            await parseSheet(wb);
+            setView('table');
           }
         }
       } catch (err) {
@@ -180,7 +195,6 @@ export default function SterlinkManagerPage({ onFileSelected }: SterlinkManagerP
     loadPersistentData();
   }, []);
 
-  // 2. Drag & Drop Event Listeners
   useEffect(() => {
     let unlistenEnter: (() => void) | null = null;
     let unlistenLeave: (() => void) | null = null;
@@ -198,22 +212,19 @@ export default function SterlinkManagerPage({ onFileSelected }: SterlinkManagerP
         if (view !== 'upload') return;
         const paths = event.payload?.paths;
         if (paths && paths.length > 0) {
-          const path = paths[0];
-          const name = path.split(/[/\\]/).pop() || 'excel_file.xlsx';
           try {
-            const content = await readFile(path);
-            await parseExcel(content.buffer, name, path);
-            if (onFileSelected) onFileSelected(name, path);
+            const filePath = paths[0];
+            const content = await readFile(filePath);
+            const name = filePath.split(/[/\\]/).pop() || 'file';
+            handleFile(new File([content], name), filePath);
           } catch (err) {
-            console.error('Error reading dropped file:', err);
-            showToast('Errore nel caricamento del file', 'error');
+            console.error('Drag-drop error:', err);
+            toast('Errore nel caricamento file', 'error');
           }
         }
       });
     };
-
     setup();
-
     return () => {
       if (unlistenEnter) unlistenEnter();
       if (unlistenLeave) unlistenLeave();
@@ -221,566 +232,550 @@ export default function SterlinkManagerPage({ onFileSelected }: SterlinkManagerP
     };
   }, [view]);
 
-  // --- Logic Functions ---
-
-  const readExcelFile = (file: File, path?: string | null) => {
-    if (path) setOriginalPath(path);
-    saveExcelFile('sterlink', file, path).catch(err => console.error('Error saving file:', err));
-    if (onFileSelected) onFileSelected(file.name, path || null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const buffer = ev.target?.result as ArrayBuffer;
-      parseExcel(buffer, file.name, path);
+  useEffect(() => {
+    if (!originalPath || originalFileHash === null) return;
+    let mounted = true;
+    const interval = setInterval(() => {
+      (async () => {
+        if (!originalPath) return;
+        try {
+          const currentHash = await calculateFileHash(originalPath);
+          if (currentHash && currentHash !== originalFileHash && currentHash !== lastNotifiedExternalHash) {
+            if (mounted) {
+              setLastNotifiedExternalHash(currentHash);
+              setShowExternalUpdateBanner(true);
+              toast('Il file originale è stato modificato esternamente', 'info');
+            }
+          }
+        } catch (err) {}
+      })();
+    }, AUTO_REFRESH_INTERVAL);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
     };
-    reader.readAsArrayBuffer(file);
-  };
+  }, [originalPath, originalFileHash, lastNotifiedExternalHash]);
 
-  const parseExcel = async (buffer: ArrayBuffer, fileName: string, path?: string | null) => {
-    try {
-      const wb = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: true });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false, dateNF: 'dd/mm/yyyy' }) as any[][];
-
-      if (!raw || raw.length < 1) {
-          showToast('File vuoto o non leggibile', 'error');
-          return;
-      }
-
-      const headerNames = raw[0].map(h => String(h || ''));
-      const dataRows = raw.slice(1).filter(r => r.length > 0).map((r, ri) => {
-        const obj: DataRow = { _id: ri + 1 };
-        headerNames.forEach((h, ci) => {
-            obj[h] = r[ci];
-        });
-        return obj;
-      });
-
-      setHeaders(headerNames);
-      setRows(dataRows);
-      setFileName(fileName);
-      setOriginalPath(path || null);
-      setLoadedAt(new Date().toLocaleString('it-IT'));
-      setView('table');
-      setModified(false);
-      nextIdRef.current = dataRows.length + 1;
-      
-      // Save metadata
-      await setSetting('sterlink_headers', headerNames);
-      await setSetting('sterlink_original_rows_count', dataRows.length);
-      await saveExcelDataJson('sterlink', dataRows);
-      
-      showToast('File caricato con successo', 'success');
-    } catch (err) {
-      console.error('Error parsing excel:', err);
-      showToast('Errore nel caricamento del file Excel', 'error');
+  const toast = (text: string, type: 'success' | 'error' | 'info' | 'loading' = 'info') => {
+    setToastMsg({ text, type });
+    if (type !== 'loading') {
+      setTimeout(() => setToastMsg(null), 3000);
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) readExcelFile(file);
+  const reloadFromExternal = async () => {
+    if (!originalPath) return;
+    try {
+      const content = await readFile(originalPath);
+      const file = new File([content], fileName);
+      await handleFile(file, originalPath);
+      toast('File ricaricato con le modifiche esterne', 'success');
+    } catch (err) {
+      console.error('Error reloading external file:', err);
+      toast('Errore nel ricaricare il file', 'error');
+    }
   };
 
-  const handleAddRow = () => {
-    const newRow: DataRow = { _id: nextIdRef.current++, _new: true };
-    headers.forEach(h => newRow[h] = '');
-    setModalData(newRow);
-    setIsNewRow(true);
-    setIsModalOpen(true);
+  const handleFile = async (file: File, path?: string | null) => {
+    setFileName(file.name);
+    if (path) setOriginalPath(path);
+    if (onFileSelected) onFileSelected(file.name, path || null);
+    await saveExcelFile('sterlink', file, path).catch(err => console.error('Error saving file:', err));
+
+    if (path) {
+      const hash = await calculateFileHash(path);
+      if (hash) {
+        setOriginalFileHash(hash);
+        setShowExternalUpdateBanner(false);
+      }
+    }
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buffer);
+      await parseSheet(wb);
+      setView('table');
+      toast(`File caricato: ${file.name}`, 'success');
+    } catch (err: any) {
+      toast(`Errore nel caricamento: ${err.message}`, 'error');
+    }
   };
 
-  const deleteRow = (id: number) => {
-    setRows(prev => prev.filter(r => r._id !== id));
-    setModified(true);
+  const formatDate = (d: any) => {
+    if (!d) return null;
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return null;
+    const dd = String(dt.getDate()).padStart(2, '0');
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}/${dt.getFullYear()}`;
   };
 
-  const openEdit = (id: number) => {
-    const row = rows.find(r => r._id === id);
-    if (!row) return;
-    setModalData({ ...row });
-    setIsNewRow(false);
-    setIsModalOpen(true);
+  const parseSheet = async (wb: any) => {
+    const ws = wb.worksheets[0]; // Prendi il primo foglio per Sterlink
+    const headerRow = ws.getRow(1);
+    const colCount = headerRow.cellCount;
+
+    const cols: string[] = [];
+    const colIndices: number[] = [];
+
+    for (let c = 1; c <= colCount; c++) {
+      const cell = headerRow.getCell(c);
+      const header = cell.value;
+      if (header != null && String(header).trim() !== '') {
+        cols.push(String(header).trim());
+        colIndices.push(c - 1);
+      }
+    }
+
+    if (cols.length === 0) throw new Error('Impossibile identificare le colonne');
+
+    setDynamicCols(cols);
+    const newRows: SterlinkRow[] = [];
+    const rowCount = ws.rowCount;
+
+    for (let r = 2; r <= rowCount; r++) {
+      const xlRow = ws.getRow(r);
+      let hasData = false;
+      for (let i = 0; i < Math.min(3, cols.length); i++) {
+        const cell = xlRow.getCell(colIndices[i] + 1);
+        const val = cell.value;
+        if (val != null && val !== '' && val !== 'null') {
+          hasData = true;
+          break;
+        }
+      }
+
+      if (!hasData) {
+        const emptyRow: SterlinkRow = { _empty: true };
+        for (const col of cols) emptyRow[col] = null;
+        newRows.push(emptyRow);
+        continue;
+      }
+
+      const row: SterlinkRow = { _empty: false };
+      for (let idx = 0; idx < cols.length; idx++) {
+        const col = cols[idx];
+        const cell = xlRow.getCell(colIndices[idx] + 1);
+        let value = cell.value;
+        if (value instanceof Date) value = formatDate(value);
+        else if (value !== null && value !== undefined) value = String(value);
+        else value = null;
+        row[col] = value;
+      }
+      newRows.push(row);
+    }
+
+    while (newRows.length > 0 && newRows[newRows.length - 1]._empty) newRows.pop();
+
+    setRows(newRows);
+    setOriginalRows(newRows);
+    setHasUnsavedChanges(false);
+    await saveExcelDataJson('sterlink', newRows);
+    await setSetting('sterlink_original_rows_count', newRows.length);
+    await setSetting('sterlink_dynamic_cols', cols);
   };
 
-  const saveModalRow = () => {
-    if (!modalData) return;
-    setRows(prev => {
-      const updated = isNewRow 
-        ? [...prev, modalData] 
-        : prev.map(r => r._id === modalData._id ? modalData : r);
-      saveExcelDataJson('sterlink', updated);
-      return updated;
-    });
-    setIsModalOpen(false);
-    setModified(true);
-    showToast(isNewRow ? 'Nuova riga aggiunta' : 'Riga aggiornata', 'success');
-  };
+  const getVisibleRows = useCallback(() => {
+    let visible = rows.filter(r => !r._empty);
+    if (searchTerm) {
+      const s = searchTerm.toLowerCase();
+      visible = visible.filter(r => dynamicCols.some(c => r[c] && String(r[c]).toLowerCase().includes(s)));
+    }
+    if (sortCol) {
+      visible.sort((a, b) => String(a[sortCol] || '').localeCompare(String(b[sortCol] || ''), undefined, { numeric: true }) * sortDir);
+    }
+    return visible;
+  }, [rows, searchTerm, sortCol, sortDir, dynamicCols]);
 
-  const updateModalField = (header: string, val: string) => {
-    setModalData(prev => prev ? { ...prev, [header]: val } : null);
-  };
-
-  const saveToExcel = async () => {
-    if (!rows.length) {
-      showToast('Nessun dato da salvare', 'error');
+  const exportXlsx = async () => {
+    if (rows.length === 0) {
+      toast('Nessun dato da esportare', 'error');
       return;
     }
-
     try {
-      const origBuffer = await getExcelFileBuffer('sterlink');
-      if (!origBuffer) {
-        showToast('File originale non trovato. Carica nuovamente il file.', 'error');
-        return;
-      }
-
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(origBuffer);
-      const worksheet = workbook.worksheets[0];
-      
-      const originalRowsCount = await getSetting<number>('sterlink_original_rows_count', 0);
-      const headerNames = await getSetting<string[]>('sterlink_headers', headers);
-      
-      // Task 43: Update Existing Rows & Append New Ones
-      rows.forEach((row, ri) => {
-        const rowIdx = ri + 1; // logical index
-        if (!row._new && rowIdx <= originalRowsCount) {
-          // Update existing row
-          const xlRow = worksheet.getRow(rowIdx + 1); // +1 for header
-          headerNames.forEach((h, ci) => {
-            xlRow.getCell(ci + 1).value = row[h] ?? '';
-          });
-        } else {
-          // New row: add manually and copy styles from previous row to maintain parity
-          const prevRow = worksheet.getRow(worksheet.lastRow ? worksheet.lastRow.number : ri + 1);
-          const newRowNumber = (worksheet.lastRow ? worksheet.lastRow.number : ri + 1) + 1;
-          const newXlRow = worksheet.getRow(newRowNumber);
-          
-          headerNames.forEach((h, ci) => {
-            const cell = newXlRow.getCell(ci + 1);
-            cell.value = row[h] ?? '';
-            // Copy base style accurately
-            const prevCell = prevRow.getCell(ci + 1);
-            if (prevCell && prevCell.style) {
-              cell.style = { ...prevCell.style };
-            }
-          });
-        }
-      });
-
-      // Clear AutoFilter to prevent Table corruption (Task 43 fix)
-      worksheet.autoFilter = undefined;
-
-      const buffer = await workbook.xlsx.writeBuffer();
-      
-      // Update local cache and state
-      await saveExcelDataJson('sterlink', rows);
-      
-      let userPath = originalPath;
-      if (!userPath) {
-        userPath = await save({
-          defaultPath: (fileName || 'sterlink_export').replace(/\.(xlsx|xls)$/i, '') + '_aggiornato.xlsx',
+      let outputPath = originalPath;
+      if (!outputPath) {
+        outputPath = await save({
+          defaultPath: fileName.replace(/\.(xlsx|xls)$/i, '') + '_aggiornato.xlsx',
           filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
         });
       }
-
-      if (userPath) {
-        // Save to source (now sync logic handles it inside saveExcelFile)
-        await saveExcelFile('sterlink', new File([buffer], fileName || 'export.xlsx'), userPath);
-        if (userPath !== originalPath) {
-          setOriginalPath(userPath);
-          if (onFileSelected) onFileSelected(fileName || 'export.xlsx', userPath);
-        }
-        setModified(false);
-        showToast('Sincronizzazione completata!', 'success');
-      } else {
-        // Fallback save to internal cache only
-        await saveExcelFile('sterlink', new File([buffer], fileName || 'export.xlsx'), originalPath);
-        showToast('Copia aggiornata salvata in locale (AppData)', 'info');
+      if (!outputPath) {
+        toast('Percorso di salvataggio non specificato', 'error');
+        return;
       }
-    } catch (err) {
-      console.error('Error saving excel:', err);
-      showToast('Errore durante il salvataggio', 'error');
+      setIsSaving(true);
+      toast('Salvataggio in corso...', 'loading');
+
+      const result = await invoke<string>('save_sterlink_command', {
+        params: {
+          current_data: rows,
+          original_data: originalRows,
+          dynamic_cols: dynamicCols,
+          original_rows_count: originalRows.length,
+          original_path: originalPath || outputPath,
+          output_path: outputPath
+        }
+      });
+
+      await saveExcelDataJson('sterlink', rows);
+      setOriginalRows([...rows]);
+      if (outputPath !== originalPath) {
+        setOriginalPath(outputPath);
+        if (onFileSelected) onFileSelected(fileName, outputPath);
+      }
+
+      if (outputPath) {
+        const newHash = await calculateFileHash(outputPath);
+        setOriginalFileHash(newHash);
+        setShowExternalUpdateBanner(false);
+      }
+
+      setIsSaving(false);
+      toast(result || 'Sincronizzazione completata!', 'success');
+      setHasUnsavedChanges(false);
+    } catch (err: any) {
+      console.error('Export error:', err);
+      setIsSaving(false);
+      toast(`Errore: ${err.message}`, 'error');
     }
   };
 
-  const getFilteredSortedRows = () => {
-    let result = [...rows];
-    if (searchTerm) {
-      const q = searchTerm.toLowerCase();
-      result = result.filter(r => 
-        Object.values(r).some(v => String(v).toLowerCase().includes(q))
+  const openNewRow = () => {
+    setEditingIdx(null);
+    setIsNew(true);
+
+    const idCol = dynamicCols.find(c => c.toUpperCase().includes('NUMERO') && c.toUpperCase().includes('CHECKLIST'))
+      || dynamicCols.find(c => c.toUpperCase().includes('SERIALE'))
+      || dynamicCols[0];
+
+    const nextId = Math.max(0, ...rows.filter(r => !r._empty).map(r => {
+      const val = r[idCol];
+      return val != null ? parseInt(String(val)) || 0 : 0;
+    })) + 1;
+
+    const emptyRow: Partial<SterlinkRow> = {
+      [idCol]: nextId,
+      _empty: false,
+      _new: true
+    };
+    dynamicCols.forEach(col => {
+      if (!(col in emptyRow)) emptyRow[col] = null;
+    });
+    setFormData(emptyRow);
+    setModalOpen(true);
+  };
+
+  const saveRow = () => {
+    const newRow: SterlinkRow = {
+      ...formData as Record<string, any>,
+      _empty: false
+    };
+
+    if (isNew) {
+      setRows(prev => {
+        const updated = [...prev, newRow];
+        saveExcelDataJson('sterlink', updated);
+        return updated;
+      });
+      toast('Nuova riga aggiunta', 'success');
+    } else if (editingIdx !== null) {
+      setRows(prev => {
+        const updated = [...prev];
+        updated[editingIdx] = newRow;
+        saveExcelDataJson('sterlink', updated);
+        return updated;
+      });
+      toast('Riga aggiornata', 'success');
+    }
+    setModalOpen(false);
+    setHasUnsavedChanges(true);
+  };
+
+  const deleteRow = async (idx: number) => {
+    const confirmed = await ask('Eliminare definitivamente questa riga?', {
+      title: 'Conferma eliminazione',
+      kind: 'warning'
+    });
+    if (!confirmed) return;
+    setRows(prev => {
+      const updated = prev.filter((_, i) => i !== idx);
+      saveExcelDataJson('sterlink', updated);
+      return updated;
+    });
+    setHasUnsavedChanges(true);
+    toast('Riga eliminata', 'info');
+  };
+
+  const openEdit = (idx: number) => {
+    setEditingIdx(idx);
+    setIsNew(false);
+    setFormData({ ...rows[idx] });
+    setModalOpen(true);
+  };
+
+  const visibleRows = getVisibleRows();
+  const tableCols = useMemo(() => {
+    if (dynamicCols.length === 0) return [];
+    const idCol = dynamicCols.find(c => c.toUpperCase().includes('SERIALE'));
+    const checklistCol = dynamicCols.find(c => c.toUpperCase().includes('NUMERO') && c.toUpperCase().includes('CHECKLIST'));
+    const priority = checklistCol || idCol;
+    if (priority) return [priority, ...dynamicCols.filter(c => c !== priority)];
+    return dynamicCols;
+  }, [dynamicCols]);
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [formData, setFormData] = useState<Partial<SterlinkRow>>({});
+
+  const renderCellValue = (value: any, header: string) => {
+    if (value === null || value === undefined || value === '') return <span className="text-neutral-400 italic">—</span>;
+    const strVal = String(value);
+    
+    // MultiEntry logic for Sterlink
+    if (isMultiEntryValue(strVal)) {
+      const entries = parseMultiEntry(strVal);
+      return (
+        <div className="flex flex-col gap-1 py-1">
+          {entries.map((e, idx) => (
+            <div key={idx} className="flex items-center gap-2">
+              <div className="w-1 h-1 rounded-full bg-primary-500" />
+              <span className="text-[11px] text-neutral-600 dark:text-neutral-300 leading-tight">{e.value}</span>
+            </div>
+          ))}
+        </div>
       );
     }
-    if (sortCol !== null) {
-      const h = headers[sortCol];
-      result.sort((a, b) => {
-        const va = String(a[h] || '');
-        const vb = String(b[h] || '');
-        return va.localeCompare(vb, 'it', { numeric: true }) * sortDir;
-      });
-    }
-    return result;
-  };
 
-  const handleSort = (idx: number) => {
-    if (sortCol === idx) {
-      setSortDir(prev => prev === 1 ? -1 : 1);
-    } else {
-      setSortCol(idx);
-      setSortDir(1);
-    }
-  };
-
-  const renderCellValue = (value: any, header: string, query: string) => {
-    if (value === null || value === undefined || value === '') return <span className="cell-null">—</span>;
-    const strVal = String(value);
-    if (isMultiEntryValue(strVal)) return renderMultiEntry(strVal, query, header);
-    
-    let display = strVal;
-    if (query && strVal.toLowerCase().includes(query.toLowerCase())) {
-      const re = new RegExp(`(${query})`, 'gi');
-      display = strVal.replace(re, '<mark class="highlight">$1</mark>');
-    }
-    
-    const isDate = header.toLowerCase().includes('data');
     const isSerial = header.toUpperCase().includes('SERIALE');
-    let className = 'cell-content';
-    if (isSerial) className += ' cell-serial';
-    else if (isDate) className += ' cell-date';
-    
-    return <div className={className} dangerouslySetInnerHTML={{ __html: display }} />;
-  };
+    const isVersion = header.toUpperCase().includes('VERSIONE') || header.toUpperCase().includes('SW');
+    const isDate = header.toUpperCase().includes('DATA');
 
-  const renderMultiEntry = (val: string, query: string, colHeader: string) => {
-    const entries = parseMultiEntry(val);
     return (
-      <div className="multi-entries flex flex-col gap-1.5 py-1">
-        {entries.map((e, idx) => {
-          const isNA = !e.value || e.value.toUpperCase() === 'NA' || e.value === 'N/A';
-          let text = isNA ? 'N/D' : e.value;
-          if (query && text.toLowerCase().includes(query.toLowerCase())) {
-            const re = new RegExp(`(${query})`, 'gi');
-            text = text.replace(re, '<mark class="highlight">$1</mark>');
-          }
-          const isDate = colHeader.toLowerCase().includes('data');
-          return (
-            <div key={idx} className="entry-slot flex items-center gap-2 group/entry" data-idx={Math.min(idx, 4)}>
-              <div className="entry-dot w-1.5 h-1.5 rounded-full flex-shrink-0 bg-[var(--dot-color)] shadow-[0_0_8px_var(--dot-color)] opacity-70" />
-              <span className={`text-[11px] font-medium leading-relaxed ${isNA ? 'text-neutral-400 italic' : isDate ? 'text-amber-600' : 'text-neutral-600 dark:text-neutral-300'}`} dangerouslySetInnerHTML={{ __html: text }} />
-            </div>
-          );
-        })}
+      <div className={`text-sm leading-relaxed ${isSerial ? 'font-black text-emerald-600' : isVersion ? 'font-bold text-blue-600' : isDate ? 'text-amber-600 font-medium' : 'text-neutral-700 dark:text-neutral-200'}`}>
+        {strVal}
       </div>
     );
   };
 
-  const displayedRows = getFilteredSortedRows();
+  if (view === 'upload') {
+    return (
+      <div className={`flex-1 flex flex-col items-center justify-center py-12 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500 ${className}`}>
+        <div className="text-center mb-12">
+          <h2 className="text-4xl font-extrabold text-neutral-900 dark:text-white mb-4">Sterlink Manager</h2>
+          <p className="text-lg text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">
+            Gestisci l'elenco delle macchine Sterlink installate, monitora le versioni software e gli interventi tecnici.
+          </p>
+        </div>
+        <div
+          className={`w-full max-w-3xl p-16 text-center border-2 border-dashed rounded-3xl transition-all duration-300 cursor-pointer shadow-sm
+            ${isDragging
+              ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 scale-[1.02] shadow-xl shadow-primary-500/10'
+              : 'border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:border-primary-500 hover:shadow-lg hover:shadow-primary-500/5'
+            }`}
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault(); setIsDragging(false);
+            const file = e.dataTransfer.files[0];
+            if (file) handleFile(file);
+          }}
+          onClick={async () => {
+            const selected = await open({ filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }] });
+            if (selected && !Array.isArray(selected)) {
+              const content = await readFile(selected);
+              handleFile(new File([content], selected.split(/[/\\]/).pop() || 'file'), selected);
+            }
+          }}
+        >
+          <div className="w-24 h-24 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-8 transition-transform">
+            <FileSpreadsheet className="w-12 h-12 text-primary-600" />
+          </div>
+          <h3 className="text-3xl font-bold mb-3 text-neutral-900 dark:text-white">Carica il database Sterlink</h3>
+          <p className="text-neutral-500 dark:text-neutral-400 mb-8 max-w-md mx-auto">Trascina qui il file Excel o clicca per sfogliare il computer.</p>
+          <div className="inline-flex items-center gap-2 px-8 py-4 bg-primary-600 text-white font-bold rounded-2xl hover:bg-primary-700 transition-colors shadow-lg">
+            <Upload className="w-5 h-5" /> Sfoglia File
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col bg-neutral-50 dark:bg-neutral-900 min-h-full">
-      <style>{`
-        .highlight { background: #fde047; color: #000; padding: 0 2px; border-radius: 2px; }
-        .cell-content { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; min-width: 140px; padding: 8px 0; }
-        .cell-null { color: #9ca3af; font-style: italic; }
-        .cell-serial { font-weight: 800; color: #10b981; }
-        .cell-date { color: #f59e0b; font-weight: 600; }
-        .entry-slot[data-idx="0"] { --dot-color: #3b82f6; }
-        .entry-slot[data-idx="1"] { --dot-color: #10b981; }
-        .entry-slot[data-idx="2"] { --dot-color: #f59e0b; }
-        .entry-slot[data-idx="3"] { --dot-color: #a855f7; }
-        .entry-slot[data-idx="4"] { --dot-color: #ef4444; }
-        .toast { padding: 12px 20px; border-radius: 12px; font-size: 14px; font-weight: bold; color: white; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 8px; }
-        .toast.success { background: #10b981; }
-        .toast.error { background: #ef4444; }
-        .toast.info { background: #3b82f6; }
-      `}</style>
-
-      {/* Upload View */}
-      {view === 'upload' && (
-        <div className="flex-1 flex flex-col items-center justify-center py-12 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-extrabold text-neutral-900 dark:text-white mb-4">Sterlink Manager</h2>
-            <p className="text-lg text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">
-              Carica un file Excel con il log degli interventi Sterlink per visualizzarli in formato tabella e modificarli.
-            </p>
+    <div className={`flex flex-col h-full ${className}`}>
+      {showExternalUpdateBanner && (
+        <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-yellow-100/90 backdrop-blur-md border border-yellow-400 text-yellow-800 p-4 rounded-2xl shadow-2xl z-50 max-w-md animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertCircle className="w-5 h-5" />
+            <span className="font-semibold text-lg">Modifica rilevata all'esterno</span>
           </div>
-
-          <div
-            className={`w-full max-w-3xl p-16 text-center border-2 border-dashed rounded-3xl transition-all duration-300 cursor-pointer shadow-sm
-              ${isDragging 
-                ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 scale-[1.02] shadow-xl shadow-primary-500/10' 
-                : 'border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:border-primary-500 hover:shadow-lg hover:shadow-primary-500/5'
-              }`}
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={async (e) => {
-              e.preventDefault();
-              setIsDragging(false);
-              const file = e.dataTransfer.files?.[0];
-              if (file) readExcelFile(file);
-            }}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx,.xls" onChange={handleFileSelect} />
-            <div className="w-24 h-24 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-8 transition-transform group-hover:scale-110">
-              <FileSpreadsheet className="w-12 h-12 text-primary-600" />
-            </div>
-            <h3 className="text-3xl font-bold mb-3 text-neutral-900 dark:text-white">Trascina qui il file Excel</h3>
-            <p className="text-neutral-500 dark:text-neutral-400 mb-8 max-w-md mx-auto text-lg leading-relaxed">
-              Puoi anche cliccare ovunque in quest'area per sfogliare i file nel tuo computer.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <div className="px-4 py-2 bg-neutral-100 dark:bg-neutral-700/50 rounded-xl text-xs font-bold text-neutral-500 flex items-center gap-2">
-                <CheckCircle className="w-3.5 h-3.5" /> Supporta .xlsx, .xls
-              </div>
-              <div className="px-4 py-2 bg-neutral-100 dark:bg-neutral-700/50 rounded-xl text-xs font-bold text-neutral-500 flex items-center gap-2">
-                <CheckCircle className="w-3.5 h-3.5" /> Lettura celle formattate
-              </div>
-            </div>
+          <p className="text-sm mb-3">Vuoi ricaricare i dati e sincronizzare?</p>
+          <div className="flex gap-2">
+            <button onClick={reloadFromExternal} className="flex-1 px-4 py-2 bg-yellow-500 text-white rounded-xl text-sm font-bold shadow-sm hover:bg-yellow-600">Ricarica</button>
+            <button onClick={() => setShowExternalUpdateBanner(false)} className="flex-1 px-4 py-2 bg-white/50 text-yellow-800 rounded-xl text-sm font-bold border border-yellow-300">Ignora</button>
           </div>
         </div>
       )}
 
-      {/* Table View */}
-      {view === 'table' && (
-        <div className="flex-1 flex flex-col p-6 animate-in fade-in duration-500 overflow-hidden">
-          
-          {/* Header Section */}
-          <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-100 dark:border-neutral-800">
-                <FileSpreadsheet className="w-6 h-6 text-primary-600" />
-              </div>
-              <div>
-                <h3 className="text-xl font-black text-neutral-900 dark:text-white flex items-center gap-2">
-                  {fileName}
-                  {modified && <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" title="Modifiche non salvate" />}
-                </h3>
-                <p className="text-xs text-neutral-500 font-medium">Caricato il: {loadedAt}</p>
-              </div>
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-2">
-              <button 
-                onClick={saveToExcel} 
-                className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl shadow-lg shadow-primary-500/10 transition-all flex items-center gap-2 text-sm font-bold"
-              >
-                <Save className="w-4 h-4" />
-                Salva Modifiche
-              </button>
-              <button 
-                onClick={() => setView('upload')} 
-                className="px-4 py-2 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 rounded-xl hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-all flex items-center gap-2 text-sm font-bold"
-              >
-                <Upload className="w-4 h-4" />
-                Ricarica file
-              </button>
-            </div>
+      {/* Header Fisso */}
+      <div className="sticky top-16 z-20 flex flex-col gap-4 pt-4 pb-6 bg-transparent -mx-4 px-4 -mt-8">
+        <div className="flex items-center gap-4 p-4 bg-white/80 dark:bg-neutral-800/80 rounded-2xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="w-6 h-6 text-blue-600" />
+            <span className="px-2 py-1 text-xs font-mono bg-neutral-100 dark:bg-neutral-700/50 rounded text-neutral-600 dark:text-neutral-300">{fileName}</span>
           </div>
-
-          {/* Toolbar - Matching Pandetta Layout (Task 45) */}
-          <div className="mb-6 flex flex-wrap items-center gap-3 p-4 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700">
-            <div className="relative flex-1 min-w-[240px]">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-neutral-400" />
-              <input 
-                type="text" 
-                placeholder="Cerca in tutte le colonne..." 
-                className="w-full pl-11 pr-4 py-2.5 bg-neutral-50 dark:bg-neutral-900 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary-500 transition-all"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-              />
-            </div>
-            
-            <div className="h-8 w-px bg-neutral-200 dark:bg-neutral-700 mx-1 hidden sm:block" />
-            
-            <button 
-              onClick={handleAddRow}
-              className="px-4 py-2.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-xl text-xs font-black uppercase tracking-widest hover:scale-105 transition-all flex items-center gap-2"
+          <div className="flex-1 relative max-w-md ml-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+            <input
+              type="text"
+              placeholder="Cerca macchine, seriali, versioni..."
+              className="w-full pl-10 pr-4 py-2 bg-neutral-100 dark:bg-neutral-700/50 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary-500"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-3 ml-auto">
+             <button
+              onClick={openNewRow}
+              className="flex items-center gap-2 px-4 py-2 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold rounded-xl hover:scale-105 transition-transform text-sm"
             >
-              <Plus className="w-4 h-4" />
-              Aggiungi Riga
+              <Plus className="w-4 h-4" /> Aggiungi Macchina
             </button>
-            
-            <div className="flex items-center gap-2 ml-auto text-xs font-bold text-neutral-500">
-              <div className="px-3 py-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-lg">
-                <span className="text-neutral-900 dark:text-neutral-200">{displayedRows.length}</span> Righe
-              </div>
-            </div>
-          </div>
-
-          {/* Table Container */}
-          <div className="flex-1 bg-white dark:bg-neutral-800 rounded-3xl shadow-sm border border-neutral-100 dark:border-neutral-800 overflow-hidden flex flex-col">
-            <div className="overflow-x-auto overflow-y-auto flex-1 custom-scrollbar">
-              <table className="w-full text-left border-collapse min-w-max">
-                <thead>
-                  <tr className="bg-neutral-50/80 dark:bg-neutral-900/50 backdrop-blur-sm sticky top-0 z-10 border-b border-neutral-100 dark:border-neutral-800">
-                    <th className="px-6 py-5 first:rounded-tl-3xl last:rounded-tr-3xl">
-                      <div className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">#</div>
-                    </th>
-                    {headers.map((h, i) => (
-                      <th 
-                        key={i} 
-                        className="px-6 py-5 cursor-pointer group/th"
-                        onClick={() => handleSort(i)}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 group-hover/th:text-primary-600 transition-colors">
-                            {h}
-                          </span>
-                          {sortCol === i && (
-                            <div className={`w-1.5 h-1.5 rounded-full bg-primary-500 ${sortDir === 1 ? 'animate-bounce' : ''}`} />
-                          )}
-                        </div>
-                      </th>
-                    ))}
-                    <th className="px-6 py-5 text-right w-20 sticky right-0 bg-neutral-50/80 dark:bg-neutral-900/50">
-                       <div className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Azioni</div>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-50 dark:divide-neutral-900">
-                  {displayedRows.length > 0 ? (
-                    displayedRows.map((row, ri) => (
-                      <tr key={row._id} className="group hover:bg-neutral-50/50 dark:hover:bg-neutral-800/50 transition-colors">
-                        <td className="px-6 py-4">
-                          <span className="text-xs font-bold text-neutral-400">#{ri + 1}</span>
-                        </td>
-                        {headers.map((h, ci) => (
-                          <td key={ci} className="px-6 py-4" onClick={() => openEdit(row._id)}>
-                            {renderCellValue(row[h], h, searchTerm)}
-                          </td>
-                        ))}
-                        <td className="px-6 py-4 sticky right-0 bg-white dark:bg-neutral-800 group-hover:bg-neutral-50 dark:group-hover:bg-neutral-850 transition-colors">
-                          <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button 
-                              onClick={() => openEdit(row._id)}
-                              className="p-1.5 text-neutral-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-all"
-                            >
-                              <Plus className="w-4 h-4" />
-                            </button>
-                            <button 
-                              onClick={() => deleteRow(row._id)}
-                              className="p-1.5 text-neutral-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={headers.length + 2} className="px-6 py-24 text-center">
-                        <Search className="w-12 h-12 text-neutral-200 dark:text-neutral-700 mx-auto mb-4" />
-                        <p className="text-neutral-500 font-medium">Nessuna riga trovata con i filtri attuali</p>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <button
+              onClick={exportXlsx}
+              disabled={isSaving}
+              className={`flex items-center gap-2 px-6 py-2 bg-primary-600 text-white font-bold rounded-xl shadow-lg shadow-primary-500/20 transition-all text-sm
+                ${isSaving ? 'opacity-70 cursor-not-allowed' : 'hover:bg-primary-700 hover:scale-105 active:scale-95'}`}
+            >
+              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isSaving ? 'Salvataggio...' : 'Sincronizza Excel'}
+            </button>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Persistence Info Footer */}
-      {view === 'table' && originalPath && (
-        <div className="px-6 py-3 bg-neutral-100 dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2 overflow-hidden">
-            <ArrowLeft className="w-3.5 h-3.5 text-neutral-400" />
-            <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest flex-shrink-0">Percorso Source:</span>
-            <span className="text-[10px] text-neutral-500 truncate font-mono bg-white dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-200 dark:border-neutral-700">{originalPath}</span>
-          </div>
+      {/* Tabella Premium */}
+      <div className="flex-1 bg-white dark:bg-neutral-800 rounded-3xl shadow-sm border border-neutral-100 dark:border-neutral-800 overflow-hidden flex flex-col mb-4">
+        <div className="overflow-x-auto overflow-y-auto flex-1 custom-scrollbar">
+          <table className="w-full text-left border-collapse min-w-max">
+            <thead>
+              <tr className="bg-neutral-50/80 dark:bg-neutral-900/50 backdrop-blur-sm sticky top-0 z-10 border-b border-neutral-100 dark:border-neutral-800">
+                <th className="px-6 py-5 first:rounded-tl-3xl"><div className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">#</div></th>
+                {tableCols.map((col, i) => (
+                  <th key={i} className="px-6 py-5 cursor-pointer group/th" onClick={() => { setSortCol(col); setSortDir(prev => prev === 1 ? -1 : 1); }}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 group-hover/th:text-primary-600 transition-colors uppercase">{col}</span>
+                      {sortCol === col && <div className={`w-1.5 h-1.5 rounded-full bg-primary-500 ${sortDir === 1 ? 'animate-bounce' : ''}`} />}
+                    </div>
+                  </th>
+                ))}
+                <th className="px-6 py-5 sticky right-0 bg-neutral-50/80 dark:bg-neutral-900/50 text-right"><div className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Azioni</div></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-50 dark:divide-neutral-900">
+              {visibleRows.map((row, ri) => (
+                <tr key={ri} className="group hover:bg-neutral-50/50 dark:hover:bg-neutral-800/50 transition-colors cursor-pointer" onClick={() => openEdit(rows.indexOf(row))}>
+                  <td className="px-6 py-4"><span className="text-xs font-bold text-neutral-400">#{ri + 1}</span></td>
+                  {tableCols.map((col, ci) => (
+                    <td key={ci} className="px-6 py-4">{renderCellValue(row[col], col)}</td>
+                  ))}
+                  <td className="px-6 py-4 sticky right-0 bg-white dark:bg-neutral-800 group-hover:bg-neutral-50 dark:group-hover:bg-neutral-850 transition-colors">
+                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={(e) => { e.stopPropagation(); openEdit(rows.indexOf(row)); }} className="p-1.5 text-neutral-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-all"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={(e) => { e.stopPropagation(); deleteRow(rows.indexOf(row)); }} className="p-1.5 text-neutral-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {visibleRows.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-24 text-neutral-400">
+              <Search className="w-12 h-12 mb-4 opacity-20" />
+              <p className="text-sm font-medium">Nessuna macchina trovata</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+       {/* Footer info */}
+      <div className="mt-auto px-4 py-3 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ArrowLeft className="w-3.5 h-3.5 text-neutral-400" />
+          <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Source:</span>
+          <span className="text-[10px] text-neutral-500 truncate font-mono max-w-sm">{originalPath || 'Cache locale'}</span>
+        </div>
+        <div className="flex items-center gap-4">
           <div className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest whitespace-nowrap">
-            Status: {modified ? 'Modifiche non salvate' : 'Sincronizzato'}
+            {hasUnsavedChanges ? <span className="text-amber-500">● Modifiche non salvate</span> : <span className="text-emerald-500">✓ Sincronizzato</span>}
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Edit Modal */}
-      {isModalOpen && modalData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      {/* Modal di Modifica */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-neutral-900/60 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="bg-white dark:bg-neutral-800 w-full max-w-4xl max-h-[90vh] rounded-[32px] shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
-            {/* Modal Header */}
             <div className="px-8 py-6 border-b border-neutral-100 dark:border-neutral-700 flex justify-between items-center bg-neutral-50/50 dark:bg-neutral-800/50">
               <div>
-                <h3 className="text-xl font-black text-neutral-900 dark:text-white">
-                  {isNewRow ? 'Aggiungi Nuova Riga' : 'Modifica Intervento'}
-                </h3>
-                <p className="text-xs text-neutral-500 font-medium">Identificativo riga: #{modalData._id}</p>
+                <h3 className="text-xl font-black text-neutral-900 dark:text-white">{isNew ? 'Nuova Macchina' : 'Modifica Dati'}</h3>
+                <p className="text-xs text-neutral-500 font-medium">Numero Checklist: {formData[dynamicCols.find(c => c.toUpperCase().includes('CHECKLIST')) || ''] || '—'}</p>
               </div>
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-full transition-all"
-              >
-                <X className="w-6 h-6 text-neutral-400" />
-              </button>
+              <button onClick={() => setModalOpen(false)} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-full transition-all"><X className="w-6 h-6 text-neutral-400" /></button>
             </div>
-
-            {/* Modal Content */}
             <div className="p-8 overflow-y-auto flex-1 custom-scrollbar">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {headers.map((h) => {
-                  const val = modalData[h];
+                {dynamicCols.map(col => {
+                  const val = formData[col];
                   const isMulti = isMultiEntryValue(val);
-                  
                   return (
-                    <div key={h} className="flex flex-col gap-2">
-                      <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">
-                        {h}
-                      </label>
-                      {isMulti ? (
-                        <MultiEntryEditor
-                          value={String(val)}
-                          onChange={(newVal) => updateModalField(h, newVal)}
-                        />
-                      ) : (
-                        <textarea
-                          className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none resize-none min-h-[44px]"
-                          value={val ?? ''}
-                          rows={1}
-                          onChange={(e) => {
-                            const target = e.target;
-                            target.style.height = 'auto';
-                            target.style.height = target.scrollHeight + 'px';
-                            updateModalField(h, target.value);
-                          }}
-                          onFocus={(e) => {
-                             const target = e.target as HTMLTextAreaElement;
-                             target.style.height = 'auto';
-                             target.style.height = target.scrollHeight + 'px';
-                          }}
-                          placeholder={`Inserisci ${h.toLowerCase()}...`}
-                        />
-                      )}
+                    <div key={col} className="flex flex-col gap-2">
+                       <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">{col}</label>
+                       {isMulti ? (
+                         <MultiEntryEditor value={String(val)} onChange={(newVal) => setFormData(prev => ({...prev, [col]: newVal}))} />
+                       ) : (
+                         <textarea
+                            className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none resize-none min-h-[44px]"
+                            value={val ?? ''}
+                            onChange={(e) => {
+                              const target = e.target;
+                              target.style.height = 'auto';
+                              target.style.height = target.scrollHeight + 'px';
+                              setFormData(prev => ({...prev, [col]: target.value}));
+                            }}
+                            onFocus={(e) => {
+                               const target = e.target as HTMLTextAreaElement;
+                               target.style.height = 'auto';
+                               target.style.height = target.scrollHeight + 'px';
+                            }}
+                            placeholder={`Inserisci ${col.toLowerCase()}...`}
+                         />
+                       )}
                     </div>
                   );
                 })}
               </div>
             </div>
-
-            {/* Modal Footer */}
             <div className="px-8 py-6 border-t border-neutral-100 dark:border-neutral-700 flex justify-end gap-3 bg-neutral-50/50 dark:bg-neutral-800/50">
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="px-6 py-3 bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-200 font-bold rounded-2xl hover:bg-neutral-50 dark:hover:bg-neutral-650 transition-all text-sm"
-              >
-                Annulla
-              </button>
-              <button 
-                onClick={saveModalRow}
-                className="px-8 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-lg shadow-primary-500/20 transition-all text-sm flex items-center gap-2"
-              >
-                <CheckCircle className="w-4 h-4" />
-                Conferma Modifiche
-              </button>
+              <button onClick={() => setModalOpen(false)} className="px-6 py-3 bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-200 font-bold rounded-2xl transition-all">Annulla</button>
+              <button onClick={saveRow} className="px-8 py-3 bg-primary-600 text-white font-bold rounded-2xl shadow-lg hover:bg-primary-700 transition-all flex items-center gap-2"><CheckCircle className="w-4 h-4" /> Conferma</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Toast Container */}
-      <div id="toast-container" className="fixed bottom-8 right-8 flex flex-col gap-2 z-[9999]"></div>
+      {/* Toast */}
+      {toastMsg && (
+        <div className={`fixed bottom-8 right-8 z-[200] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right-10 
+          ${toastMsg.type === 'success' ? 'bg-emerald-500 text-white' : 
+            toastMsg.type === 'error' ? 'bg-red-500 text-white' : 
+            toastMsg.type === 'loading' ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-white'}`}>
+          {toastMsg.type === 'loading' ? <Loader2 className="w-5 h-5 animate-spin" /> : 
+           toastMsg.type === 'success' ? <CheckCircle className="w-5 h-5" /> : 
+           toastMsg.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <Loader2 className="w-5 h-5" />}
+          <span className="text-sm font-bold">{toastMsg.text}</span>
+        </div>
+      )}
     </div>
   );
 }

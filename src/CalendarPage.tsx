@@ -1,13 +1,9 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Plus, X, Calendar as CalendarIcon, Clock, User, Trash2, Save, Cloud, AlertCircle } from 'lucide-react';
-import { getCalendarEvents, setCalendarEvents, getTechnicians, getGoogleSettings, setGoogleSettings, type CalendarEvent, type GoogleCalendarSettings } from './utils/storage';
+import { getCalendarEvents, setCalendarEvents, getTechnicians, getGoogleSettings, type CalendarEvent, type GoogleCalendarSettings } from './utils/storage';
 import { ask } from '@tauri-apps/plugin-dialog';
 
-interface CalendarPageProps {
-  theme: 'light' | 'dark';
-}
-
-export default function CalendarPage({ theme }: CalendarPageProps) {
+export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(() => {
     const today = new Date();
     const day = today.getDay(); // 0 is Sunday, 1 is Monday...

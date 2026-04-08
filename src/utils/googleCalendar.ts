@@ -1,4 +1,4 @@
-import type { GoogleCalendarSettings, CalendarEvent } from './storage';
+import type { CalendarEvent } from './storage';
 
 /**
  * Basic Google Calendar API logic.
@@ -10,6 +10,7 @@ import type { GoogleCalendarSettings, CalendarEvent } from './storage';
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const CALENDAR_API_URL = "https://www.googleapis.com/calendar/v3";
+const REDIRECT_URI = "http://localhost";
 
 export interface GoogleTokens {
   accessToken: string;
@@ -23,7 +24,7 @@ export interface GoogleTokens {
 export function getGoogleAuthUrl(clientId: string): string {
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: "http://localhost:18659", // A dummy but standard redirect for desktop apps
+    redirect_uri: REDIRECT_URI,
     response_type: "code",
     scope: "https://www.googleapis.com/auth/calendar.events",
     access_type: "offline",
@@ -44,7 +45,7 @@ export async function getTokensFromCode(code: string, clientId: string, clientSe
       code,
       client_id: clientId,
       client_secret: clientSecret,
-      redirect_uri: "http://localhost:18659",
+      redirect_uri: REDIRECT_URI,
       grant_type: "authorization_code"
     })
   });

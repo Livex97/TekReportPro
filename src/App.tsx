@@ -774,12 +774,16 @@ function App() {
     };
   }, [googleSettings?.enabled, googleSettings?.refreshToken]);
 
-  const handleGoogleAuth = () => {
+  const handleGoogleAuth = async () => {
     if (!googleSettings?.clientId) return;
-    import('./utils/googleCalendar').then(m => {
-      const url = m.getGoogleAuthUrl(googleSettings.clientId);
-      window.open(url);
-    });
+    try {
+      const { getGoogleAuthUrl } = await import('./utils/googleCalendar');
+      const { open } = await import('@tauri-apps/plugin-shell');
+      const url = getGoogleAuthUrl(googleSettings.clientId);
+      await open(url);
+    } catch (err) {
+      console.error('[GoogleAuth] Failed to open auth URL:', err);
+    }
   };
 
   const handleVerifyGoogleCode = async () => {
@@ -2676,7 +2680,7 @@ function App() {
 
           {/* --- VIEW: CALENDAR --- */}
           {currentView === 'calendar' && (
-            <CalendarPage theme={theme} />
+            <CalendarPage />
           )}
        </main>
 
