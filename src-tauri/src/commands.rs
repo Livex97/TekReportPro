@@ -24,39 +24,52 @@ pub struct SaveSterlinkParams {
     pub output_path: String,
 }
 
-fn find_sidecar_dev(name: &str) -> Result<PathBuf, String> {
-    // In development build, il binary è in src-tauri/binaries/
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-
-    // Prova prima con il nome target-specifico (symlink)
-    let target = if cfg!(target_os = "macos") {
-        if cfg!(target_arch = "aarch64") {
-            "aarch64-apple-darwin"
-        } else {
-            "x86_64-apple-darwin"
-        }
+fn get_current_target() -> &'static str {
+    if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") { "aarch64-apple-darwin" } else { "x86_64-apple-darwin" }
     } else if cfg!(target_os = "windows") {
         "x86_64-pc-windows-msvc"
-    } else {
+    } else if cfg!(target_os = "linux") {
         "x86_64-unknown-linux-gnu"
-    };
+    } else {
+        "unknown"
+    }
+}
 
-    let dev_path = PathBuf::from(manifest_dir)
+fn get_exe_extension() -> &'static str {
+    if cfg!(target_os = "windows") { ".exe" } else { "" }
+}
+
+fn find_sidecar_dev(name: &str) -> Result<PathBuf, String> {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let target = get_current_target();
+    let ext = get_exe_extension();
+
+    // 1. Cerca con target triple e estensione: name-target.exe
+    let target_spec = PathBuf::from(manifest_dir)
         .join("binaries")
-        .join(format!("{}-{}", name, target));
-    if dev_path.exists() {
-        return Ok(dev_path);
+        .join(format!("{}-{}{}", name, target, ext));
+    if target_spec.exists() {
+        return Ok(target_spec);
     }
 
-    // Fallback: nome semplice
+    // 2. Cerca solo con estensione: name.exe
+    let simple_ext = PathBuf::from(manifest_dir)
+        .join("binaries")
+        .join(format!("{}{}", name, ext));
+    if simple_ext.exists() {
+        return Ok(simple_ext);
+    }
+
+    // 3. Fallback nome semplice (compatibilità)
     let simple = PathBuf::from(manifest_dir).join("binaries").join(name);
     if simple.exists() {
         return Ok(simple);
     }
 
     Err(format!(
-        "Sidecar {} non trovato in src-tauri/binaries/. Cercato: {}-{} e {}",
-        name, name, target, name
+        "Sidecar {} non trovato in src-tauri/binaries/. Cercato: {}-{}{} e {}{}",
+        name, name, target, ext, name, ext
     ))
 }
 
@@ -64,37 +77,29 @@ fn find_sidecar_dev(name: &str) -> Result<PathBuf, String> {
 pub async fn save_pandetta_command(
     params: SavePandettaParams,
 ) -> Result<String, String> {
-    // cfg!(debug_assertions) è true in `npm run tauri dev`, false in build di produzione
     let executable = if cfg!(debug_assertions) {
         find_sidecar_dev("save_pandetta")?
     } else {
-        // In release, Tauri mette i binary da externalBin in Contents/MacOS/ (stesso dir dell'eseguibile)
         let exe_dir = std::env::current_exe()
             .map_err(|e| format!("Impossibile trovare exe path: {}", e))?
             .parent()
             .ok_or_else(|| "Impossibile trovare directory exe".to_string())?
             .to_path_buf();
 
-        // Tauri aggiunge il target triple al nome del file nel bundle
-        let target = if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "aarch64") { "aarch64-apple-darwin" } else { "x86_64-apple-darwin" }
-        } else if cfg!(target_os = "windows") {
-            "x86_64-pc-windows-msvc"
-        } else {
-            "x86_64-unknown-linux-gnu"
-        };
+        let target = get_current_target();
+        let ext = get_exe_extension();
 
-        // Prima prova con target triple, poi senza
-        let with_triple = exe_dir.join(format!("save_pandetta-{}", target));
-        let without_triple = exe_dir.join("save_pandetta");
+        let with_triple = exe_dir.join(format!("save_pandetta-{}{}", target, ext));
+        let without_triple = exe_dir.join(format!("save_pandetta{}", ext));
+        
         if with_triple.exists() {
             with_triple
         } else if without_triple.exists() {
             without_triple
         } else {
             return Err(format!(
-                "save_pandetta non trovato in {:?}. Cercato: save_pandetta-{} e save_pandetta",
-                exe_dir, target
+                "save_pandetta non trovato in {:?}. Cercato: save_pandetta-{}{} e save_pandetta{}",
+                exe_dir, target, ext, ext
             ));
         }
     };
@@ -141,24 +146,20 @@ pub async fn save_sterlink_command(
             .ok_or_else(|| "Impossibile trovare directory exe".to_string())?
             .to_path_buf();
 
-        let target = if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "aarch64") { "aarch64-apple-darwin" } else { "x86_64-apple-darwin" }
-        } else if cfg!(target_os = "windows") {
-            "x86_64-pc-windows-msvc"
-        } else {
-            "x86_64-unknown-linux-gnu"
-        };
+        let target = get_current_target();
+        let ext = get_exe_extension();
 
-        let with_triple = exe_dir.join(format!("save_sterlink-{}", target));
-        let without_triple = exe_dir.join("save_sterlink");
+        let with_triple = exe_dir.join(format!("save_sterlink-{}{}", target, ext));
+        let without_triple = exe_dir.join(format!("save_sterlink{}", ext));
+        
         if with_triple.exists() {
             with_triple
         } else if without_triple.exists() {
             without_triple
         } else {
             return Err(format!(
-                "save_sterlink non trovato in {:?}. Cercato: save_sterlink-{} e save_sterlink",
-                exe_dir, target
+                "save_sterlink non trovato in {:?}. Cercato: save_sterlink-{}{} e save_sterlink{}",
+                exe_dir, target, ext, ext
             ));
         }
     };

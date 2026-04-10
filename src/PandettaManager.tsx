@@ -84,11 +84,13 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   const [isDragging, setIsDragging] = useState(false);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' | 'loading' } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [dynamicCols, setDynamicCols] = useState<string[]>([]);
   const [originalFileHash, setOriginalFileHash] = useState<string | null>(null);
   const [showExternalUpdateBanner, setShowExternalUpdateBanner] = useState(false);
   const [lastNotifiedExternalHash, setLastNotifiedExternalHash] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [originalRows, setOriginalRows] = useState<PandettaRow[]>([]);
   const AUTO_REFRESH_INTERVAL = 8000; // ms
 
@@ -314,6 +316,8 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
   // ── FILE HANDLING ──
   const handleFile = async (file: File, path?: string | null) => {
+  setIsLoadingFile(true);
+  toast('Caricamento file...', 'loading');
     setFileName(file.name);
     if (path) setOriginalPath(path);
     if (onFileSelected) onFileSelected(file.name, path || null);
@@ -337,8 +341,10 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       await parseSheet(wb);
       setView('table');
       toast(`File caricato: ${file.name}`, 'success');
+    setIsLoadingFile(false);
     } catch (err: any) {
       toast(`Errore nel caricamento: ${err.message}`, 'error');
+    setIsLoadingFile(false);
     }
   };
 
@@ -602,6 +608,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     });
 
     setFormData(emptyRow);
+    setValidationError(null);
     setModalStatus('aperta');
     setModalOpen(true);
   };
@@ -609,9 +616,10 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   const saveRow = () => {
     // Validazione: Stato Intervento obbligatorio se presente nel form
     if (statoColName && !formData[statoColName]) {
-      toast('Il campo Stato Intervento è obbligatorio', 'error');
+      setValidationError('Il campo "STATO INTERVENTO" è obbligatorio per poter salvare la riga.');
       return;
     }
+    setValidationError(null);
 
     const newRow: PandettaRow = {
       ...formData as Record<string, any>,
@@ -664,6 +672,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     setIsNew(false);
     const row = rows[idx];
     setFormData({ ...row });
+    setValidationError(null);
     setModalStatus(row._status);
     setModalOpen(true);
   };
@@ -715,6 +724,14 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   if (view === 'upload') {
     return (
       <div className={`flex-1 flex flex-col items-center justify-center py-12 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500 ${className}`}>
+        {isLoadingFile && (
+          <div className="fixed inset-0 flex items-center justify-center bg-neutral-900/60 backdrop-blur-sm z-50">
+            <div className="flex flex-col items-center">
+              <Loader2 className="w-12 h-12 animate-spin text-white mb-4" />
+              <span className="text-white text-lg">Caricamento file...</span>
+            </div>
+          </div>
+        )}
         <div className="text-center mb-12">
           <h2 className="text-4xl font-extrabold text-neutral-900 dark:text-white mb-4">Pandetta Manager</h2>
           <p className="text-lg text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">
@@ -906,7 +923,8 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
               setView('upload');
               setHasUnsavedChanges(false);
 
-              try {
+  try {
+    // processing...
                 await clearExcelFile('pandetta');
                 if (onResetPersistent) await onResetPersistent();
                 toast('Cache rimossa. Carica un nuovo file.', 'info');
@@ -1071,6 +1089,25 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
             {/* Modal Content */}
             <div className="p-8 overflow-y-auto flex-1 bg-white dark:bg-neutral-800">
 
+              {/* Validation Error Banner */}
+              {validationError && (
+                <div className="mb-8 p-4 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-2xl flex items-center gap-3 animate-in slide-in-from-top-4 duration-300">
+                  <div className="w-10 h-10 bg-red-100 dark:bg-red-900/50 rounded-xl flex items-center justify-center shrink-0">
+                    <AlertCircle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-red-800 dark:text-red-200">{validationError}</p>
+                    <p className="text-xs text-red-600 dark:text-red-400 opacity-80">Inserisci un valore nel campo evidenziato per procedere.</p>
+                  </div>
+                  <button 
+                    onClick={() => setValidationError(null)}
+                    className="p-1 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-full transition-colors"
+                  >
+                    <X className="w-4 h-4 text-neutral-400" />
+                  </button>
+                </div>
+              )}
+
               {/* Status Selector */}
               <div className="mb-10">
                 <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1 mb-3 block">
@@ -1126,7 +1163,9 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
                             setModalStatus(newStatus);
                           }}
                           required
-                          className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none"
+                          className={`w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none ${
+                            validationError && !value ? 'border-red-500 ring-4 ring-red-500/10 bg-red-50/30' : 'border-neutral-200 dark:border-neutral-700'
+                          }`}
                           placeholder="Es. APERTO, CHIUSO..."
                         />
                         <datalist id="stato-intervento-datalist">

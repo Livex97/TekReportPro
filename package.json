@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:binaries": "python3 src-tauri/python/build_binaries.py"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",

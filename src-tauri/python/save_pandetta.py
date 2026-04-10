@@ -77,11 +77,30 @@ def apply_status_color(row_cells, status_value, ws):
         for cell in row_cells:
             cell.fill = fill
 
-def apply_tecnico_color(cell, tecnico_value):
+def apply_tecnico_color(cell, tecnico_value, color_map_payload=None):
     """Applica colore specifico per valori TECNICO nella cella."""
     if not tecnico_value:
         return
     tecnico_str = str(tecnico_value).strip().upper()
+    
+    # 1. Prova prima con la mappa dal payload (più aggiornata)
+    if color_map_payload and tecnico_str in color_map_payload:
+        info = color_map_payload[tecnico_str]
+        # Il frontend manda {bg, text, export} dove export è hex RRGGBB
+        hex_color = info.get('export', 'FFFFFF').replace('#', '')
+        if len(hex_color) == 6:
+            hex_color = 'FF' + hex_color # Aggiungi alpha
+        
+        # Determina il colore del testo (luminosità)
+        text_color = info.get('text', '#000000').replace('#', '')
+        if len(text_color) == 6:
+            text_color = 'FF' + text_color
+            
+        cell.fill = PatternFill(start_color=hex_color, end_color=hex_color, fill_type='solid')
+        cell.font = Font(color=text_color)
+        return
+
+    # 2. Fallback alla mappa hardcoded
     color_info = TECNICO_COLORS.get(tecnico_str)
     if color_info:
         cell.fill = color_info['fill']
@@ -101,6 +120,8 @@ def main():
     original_data = payload.get('original_data', [])
     dynamic_cols = payload.get('dynamic_cols')
     original_rows_count = payload.get('original_rows_count')
+    # Prendi la mappa dei colori dal payload se esiste
+    tecnico_color_map_payload = payload.get('tecnico_color_map', {})
 
     wb = openpyxl.load_workbook(in_path)
     
@@ -286,7 +307,7 @@ def main():
         if target_row and tecnico_col_idx:
             if tecnico_col_idx <= len(target_row):
                 tecnico_cell = target_row[tecnico_col_idx - 1]
-                apply_tecnico_color(tecnico_cell, tecnico_cell.value)
+                apply_tecnico_color(tecnico_cell, tecnico_cell.value, tecnico_color_map_payload)
 
     # Elimina le righe non più presenti (in ordine decrescente per evitare problemi di indice)
     rows_to_delete.sort(reverse=True)
