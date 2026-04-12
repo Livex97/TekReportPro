@@ -19,7 +19,7 @@ import PandettaManager from './PandettaManager';
 import CalendarPage from './CalendarPage';
 import './App.css';
 
-type View = 'home' | 'settings' | 'form' | 'download' | 'ai-extraction' | 'sterlink-manager' | 'pandetta-manager' | 'calendar';
+type View = 'home' | 'templates' | 'settings' | 'form' | 'download' | 'ai-extraction' | 'sterlink-manager' | 'pandetta-manager' | 'calendar';
 
 function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown }: any) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +65,7 @@ const POPULAR_ICONS = [
 ];
 
 function App() {
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'templates' | 'ai' | 'advanced' | 'managers' | 'sync'>('general');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'system' | 'database' | 'templates' | 'integrations'>('system');
   const [isIconPickerOpen, setIsIconPickerOpen] = useState<number | null>(null);
 
   const [currentView, setCurrentView] = useState<View>('home');
@@ -1043,6 +1043,17 @@ function App() {
                <HomeIcon className="w-6 h-6" />
              </button>
               <button
+                onClick={() => navigateView('templates')}
+                className={`p-2 transition-colors rounded-lg ${
+                  currentView === 'templates' || currentView === 'form' || currentView === 'download'
+                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
+                }`}
+                title="Modelli Rapportino"
+              >
+                <FileText className="w-6 h-6" />
+              </button>
+              <button
                 onClick={() => navigateView('ai-extraction')}
                 className={`p-2 transition-colors rounded-lg ${
                   currentView === 'ai-extraction'
@@ -1111,8 +1122,43 @@ function App() {
       {/* Main Content */}
       <main className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 ${['pandetta-manager', 'sterlink-manager', 'calendar'].includes(currentView) ? 'h-[calc(100vh-4rem)] p-0 pt-8' : 'py-8'}`}>
 
-        {/* --- VIEW: HOME --- */}
+        {/* --- VIEW: HOME (DASHBOARD) --- */}
         {currentView === 'home' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="text-center mb-12">
+              <h2 className="text-4xl font-extrabold text-neutral-900 dark:text-white mb-4">Dashboard Principale</h2>
+              <p className="text-lg text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">
+                Benvenuto! Scegli a cosa vuoi lavorare oggi.
+              </p>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto px-4">
+              {[
+                { id: 'templates', title: 'Compilazione Rapportino', desc: 'Compila tramite i tuoi template (.docx).', icon: <FileText className="w-8 h-8 text-blue-600" />, iconBg: 'bg-blue-50 dark:bg-blue-900/20', hoverBorder: 'hover:border-blue-500 dark:hover:border-blue-500/50' },
+                { id: 'sterlink-manager', title: 'Sterlink Manager', desc: 'Gestione del DB riparazioni.', icon: <Database className="w-8 h-8 text-emerald-600" />, iconBg: 'bg-emerald-50 dark:bg-emerald-900/20', hoverBorder: 'hover:border-emerald-500 dark:hover:border-emerald-500/50' },
+                { id: 'pandetta-manager', title: 'Pandetta Manager', desc: 'Elenco assistenze e interventi.', icon: <FileSpreadsheet className="w-8 h-8 text-cyan-600" />, iconBg: 'bg-cyan-50 dark:bg-cyan-900/20', hoverBorder: 'hover:border-cyan-500 dark:hover:border-cyan-500/50' },
+                { id: 'ai-extraction', title: 'Estrazione AI', desc: 'Converti PDF in form smart con IA.', icon: <Brain className="w-8 h-8 text-purple-600" />, iconBg: 'bg-purple-50 dark:bg-purple-900/20', hoverBorder: 'hover:border-purple-500 dark:hover:border-purple-500/50' },
+                { id: 'calendar', title: 'Calendario Google', desc: 'Visualizza gli interventi programmati.', icon: <Calendar className="w-8 h-8 text-orange-600" />, iconBg: 'bg-orange-50 dark:bg-orange-900/20', hoverBorder: 'hover:border-orange-500 dark:hover:border-orange-500/50' },
+                { id: 'settings', title: 'Impostazioni App', desc: 'Configura layout, cartelle e API.', icon: <Settings className="w-8 h-8 text-neutral-600 dark:text-neutral-300" />, iconBg: 'bg-neutral-100 dark:bg-neutral-800', hoverBorder: 'hover:border-neutral-500 dark:hover:border-neutral-500/50' },
+              ].map(card => (
+                <div
+                  key={card.id}
+                  onClick={() => navigateView(card.id as View)}
+                  className={`bg-white dark:bg-neutral-800 p-8 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 hover:shadow-xl cursor-pointer group transition-all duration-300 flex flex-col items-center text-center ${card.hoverBorder}`}
+                >
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform ${card.iconBg}`}>
+                    {card.icon}
+                  </div>
+                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">{card.title}</h3>
+                  <p className="text-sm text-neutral-500 dark:text-neutral-400">{card.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* --- VIEW: TEMPLATES --- */}
+        {currentView === 'templates' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="text-center mb-12">
               <h2 className="text-4xl font-extrabold text-neutral-900 dark:text-white mb-4">Seleziona un Template</h2>
@@ -1190,12 +1236,10 @@ function App() {
 
             <div className="flex flex-wrap gap-2 mb-8 border-b border-neutral-200 dark:border-neutral-700 pb-4">
               {[
-                { id: 'general', label: 'Impostazioni Generali', icon: <Settings className="w-4 h-4" /> },
-                { id: 'managers', label: 'Database & Manager', icon: <Database className="w-4 h-4" /> },
-                { id: 'templates', label: 'Template & Sezioni', icon: <Layout className="w-4 h-4" /> },
-                { id: 'ai', label: 'IA & Analisi', icon: <Brain className="w-4 h-4" /> },
-                { id: 'sync', label: 'Sincronizzazione', icon: <Cloud className="w-4 h-4" /> },
-                { id: 'advanced', label: 'Sistema & Dati', icon: <Server className="w-4 h-4" /> }
+                { id: 'system', label: 'Sistema & Dati', icon: <Server className="w-4 h-4" /> },
+                { id: 'database', label: 'Gestione Database', icon: <Database className="w-4 h-4" /> },
+                { id: 'templates', label: 'Template & Layout', icon: <Layout className="w-4 h-4" /> },
+                { id: 'integrations', label: 'Integrazioni & AI', icon: <Brain className="w-4 h-4" /> }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -1211,6 +1255,8 @@ function App() {
                 </button>
               ))}
             </div>
+
+            <div className="space-y-8">
             {/* --- TAB: TEMPLATES --- */}
             {activeSettingsTab === 'templates' && (
               <>
@@ -1415,8 +1461,8 @@ function App() {
               </>
             )}
 
-            {/* --- TAB: GENERAL --- */}
-            {activeSettingsTab === 'general' && (
+            {/* --- TAB: SYSTEM --- */}
+            {activeSettingsTab === 'system' && (
               <>
                 <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
                   <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
@@ -1512,7 +1558,7 @@ function App() {
             )}
 
             {/* --- TAB: MANAGERS --- */}
-            {activeSettingsTab === 'managers' && (
+            {activeSettingsTab === 'database' && (
               <div className="space-y-8">
                 {/* Pandetta Manager Settings */}
                 <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
@@ -1671,8 +1717,8 @@ function App() {
             )}
 
 
-            {/* --- TAB: AI & ANALYSIS --- */}
-            {activeSettingsTab === 'ai' && (
+            {/* --- TAB: INTEGRATIONS --- */}
+            {activeSettingsTab === 'integrations' && (
               <>
                 <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
                   <div className="flex items-center justify-between mb-4">
@@ -1834,8 +1880,8 @@ function App() {
               </>
             )}
 
-            {/* --- TAB: GOOGLE SYNC --- */}
-            {activeSettingsTab === 'sync' && (
+            {/* --- TAB: INTEGRATIONS (SYNC) --- */}
+            {activeSettingsTab === 'integrations' && (
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
                   <div className="flex items-center justify-between mb-8">
@@ -2029,7 +2075,7 @@ function App() {
               </div>
             )}
 
-            {activeSettingsTab === 'advanced' && (
+            {activeSettingsTab === 'system' && (
               <>
                 <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
                   <div className="flex items-center justify-between mb-4">
@@ -2290,8 +2336,10 @@ function App() {
               </>
             )}
 
+
           </div>
-        )}
+        </div>
+      )}
 
         {/* --- VIEW: FORM COMPILATION --- */}
         {currentView === 'form' && (
