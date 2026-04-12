@@ -140,6 +140,38 @@ export async function setSavePath(path: string): Promise<void> {
 }
 
 /**
+ * Google OAuth tokens
+ */
+export interface GoogleTokens {
+    accessToken: string;
+    refreshToken: string;
+    expiryDate: number;
+}
+
+export async function getGoogleTokens(): Promise<GoogleTokens | null> {
+    return await getSetting<GoogleTokens | null>('googleTokens', null);
+}
+
+export async function setGoogleTokens(tokens: GoogleTokens): Promise<void> {
+    await setSetting('googleTokens', tokens);
+    const store = await getStore();
+    await store.save();
+}
+
+/**
+ * Mapping from local event ID to Google Calendar event ID
+ */
+export async function getGoogleEventMap(): Promise<Record<string, string>> {
+    return await getSetting<Record<string, string>>('googleEventMap', {});
+}
+
+export async function setGoogleEventMap(map: Record<string, string>): Promise<void> {
+    await setSetting('googleEventMap', map);
+    const store = await getStore();
+    await store.save();
+}
+
+/**
  * Scans the directory for the latest document number and returns the next one.
  * Example: if latest is A26099, returns A26100
  */

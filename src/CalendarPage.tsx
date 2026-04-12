@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Plus, X, Calendar as CalendarIcon, Clock, User, Trash2, Save, Cloud, AlertCircle } from 'lucide-react';
-import { getCalendarEvents, setCalendarEvents, getTechnicians, getGoogleSettings, type CalendarEvent, type GoogleCalendarSettings } from './utils/storage';
+import { getCalendarEvents, setCalendarEvents, getTechnicians, type CalendarEvent, type GoogleCalendarSettings, getGoogleSettings, getGoogleEventMap, setGoogleEventMap, setGoogleTokens, setGoogleSettings } from './utils/storage';
+import { pushEventToGoogle, updateEventInGoogle, deleteEventFromGoogle, refreshAccessToken } from './utils/googleCalendar';
+
 import { ask } from '@tauri-apps/plugin-dialog';
 
 export default function CalendarPage() {
@@ -27,9 +29,18 @@ export default function CalendarPage() {
 
   useEffect(() => {
     loadData();
+    
+    // Listen for background sync completions
+    const handleSyncComplete = () => {
+      console.log('[CalendarPage] Background sync detected, reloading...');
+      loadData();
+    };
+    
+    window.addEventListener('sync-completed', handleSyncComplete);
+    return () => window.removeEventListener('sync-completed', handleSyncComplete);
   }, []);
 
-  const loadData = async () => {
+const loadData = async () => {
     const savedEvents = await getCalendarEvents();
     setEvents(savedEvents);
     
@@ -38,7 +49,7 @@ export default function CalendarPage() {
     
     const gSettings = await getGoogleSettings();
     setGoogleSettingsState(gSettings);
-  };
+};
 
   const nextWeek = () => {
     const next = new Date(currentDate);
@@ -75,51 +86,141 @@ export default function CalendarPage() {
     setIsModalOpen(true);
   };
 
-  const handleSaveEvent = async () => {
-    if (!formActivity.trim()) return;
+    const handleSaveEvent = async () => {
+      if (!formActivity.trim()) return;
 
-    let updatedEvents: CalendarEvent[];
-    if (editingEvent) {
-      updatedEvents = events.map(e => e.id === editingEvent.id ? {
-        ...e,
-        activity: formActivity,
-        technician: formTech,
-        notes: formNotes,
-        startTime: formStartTime || undefined,
-        endTime: formEndTime || undefined
-      } : e);
-    } else {
-      const newEvent: CalendarEvent = {
-        id: crypto.randomUUID(),
-        date: selectedDay!,
-        activity: formActivity,
-        technician: formTech,
-        notes: formNotes,
-        startTime: formStartTime || undefined,
-        endTime: formEndTime || undefined
-      };
-      updatedEvents = [...events, newEvent];
-    }
+      let eventToSync: CalendarEvent;
+      let isNew = false;
+      let updatedEvents: CalendarEvent[];
 
-    setEvents(updatedEvents);
-    await setCalendarEvents(updatedEvents);
-    setIsModalOpen(false);
-    
-    // Trigger Sync if enabled
-    if (googleSettings?.enabled && googleSettings.clientId && googleSettings.clientSecret) {
-        // Sync manager handles this in background effectively
-    }
-  };
+      if (editingEvent) {
+        eventToSync = {
+          ...editingEvent,
+          activity: formActivity,
+          technician: formTech,
+          notes: formNotes,
+          startTime: formStartTime || undefined,
+          endTime: formEndTime || undefined
+        };
+        updatedEvents = events.map(e => e.id === editingEvent.id ? eventToSync : e);
+      } else {
+        isNew = true;
+        eventToSync = {
+          id: crypto.randomUUID(),
+          date: selectedDay!,
+          activity: formActivity,
+          technician: formTech,
+          notes: formNotes,
+          startTime: formStartTime || undefined,
+          endTime: formEndTime || undefined
+        };
+        updatedEvents = [...events, eventToSync];
+      }
 
-  const handleDeleteEvent = async (id: string) => {
-    const confirmed = await ask("Vuoi davvero eliminare questa attività?", { title: 'Elimina Attività', kind: 'warning' });
-    if (confirmed) {
-      const updatedEvents = events.filter(e => e.id !== id);
+      // Sync with Google Calendar if enabled
+      if (googleSettings?.enabled && googleSettings.clientId && googleSettings.clientSecret && (googleSettings.accessToken || googleSettings.refreshToken)) {
+        try {
+          const eventMap = await getGoogleEventMap();
+          let token = googleSettings.accessToken || '';
+          const now = Date.now();
+          
+          // Refresh token if expired or missing
+          if ((!token || (googleSettings.expiryDate && now > googleSettings.expiryDate)) && googleSettings.refreshToken) {
+            console.log('[CalendarPage] Refreshing token before sync...');
+            const refreshed = await refreshAccessToken(googleSettings.refreshToken, googleSettings.clientId, googleSettings.clientSecret);
+            await setGoogleTokens(refreshed);
+            token = refreshed.accessToken;
+            // Update local state too
+            setGoogleSettingsState({ ...googleSettings, ...refreshed });
+          }
+          
+          if (token) {
+            if (eventToSync.googleEventId || eventMap[eventToSync.id]) {
+              // Update existing event
+              const gId = eventToSync.googleEventId || eventMap[eventToSync.id];
+              console.log('[CalendarPage] Updating event in Google:', gId);
+              await updateEventInGoogle(eventToSync, gId, token);
+            } else {
+              // Create new event
+              console.log('[CalendarPage] Pushing new event to Google...');
+              const googleId = await pushEventToGoogle(eventToSync, token);
+              console.log('[CalendarPage] Pushed event to Google, got ID:', googleId);
+              
+              // Update the event object with the new Google ID
+              eventToSync.googleEventId = googleId;
+              eventMap[eventToSync.id] = googleId;
+              
+              // Update updatedEvents array with the one containing googleId
+              const idx = updatedEvents.findIndex(e => e.id === eventToSync.id);
+              if (idx !== -1) {
+                updatedEvents[idx] = { ...eventToSync };
+              }
+              
+              await setGoogleEventMap(eventMap);
+            }
+            
+            // Update last sync timestamp
+            await setGoogleSettings({ ...googleSettings, lastSync: new Date().toISOString() });
+          }
+        } catch (err) {
+          console.error('[CalendarPage] Google Sync error during save:', err);
+        }
+      }
+      
       setEvents(updatedEvents);
       await setCalendarEvents(updatedEvents);
       setIsModalOpen(false);
-    }
-  };
+    };
+
+   const handleDeleteEvent = async (id: string) => {
+     const confirmed = await ask("Vuoi davvero eliminare questa attività?", { title: 'Elimina Attività', kind: 'warning' });
+     if (confirmed) {
+       // Find the event being deleted before filtering
+       const eventToDelete = events.find(e => e.id === id);
+       const updatedEvents = events.filter(e => e.id !== id);
+       
+       setEvents(updatedEvents);
+       await setCalendarEvents(updatedEvents);
+          
+       // Sync deletion with Google Calendar if enabled
+       if (googleSettings?.enabled && googleSettings.clientId && googleSettings.clientSecret && (googleSettings.accessToken || googleSettings.refreshToken)) {
+         try {
+           const eventMap = await getGoogleEventMap();
+           const googleId = eventToDelete?.googleEventId || eventMap[id];
+           
+           if (googleId) {
+             let token = googleSettings.accessToken || '';
+             const now = Date.now();
+             
+             // Refresh token if expired
+             if ((!token || (googleSettings.expiryDate && now > googleSettings.expiryDate)) && googleSettings.refreshToken) {
+               const refreshed = await refreshAccessToken(googleSettings.refreshToken, googleSettings.clientId, googleSettings.clientSecret);
+               await setGoogleTokens(refreshed);
+               token = refreshed.accessToken;
+               setGoogleSettingsState({ ...googleSettings, ...refreshed });
+             }
+             
+             if (token) {
+               console.log('[CalendarPage] Deleting event from Google:', googleId);
+               await deleteEventFromGoogle(googleId, token);
+               
+               // Remove from event map and save
+               if (eventMap[id]) {
+                 delete eventMap[id];
+                 await setGoogleEventMap(eventMap);
+               }
+             }
+           }
+           
+           // Update last sync timestamp
+           await setGoogleSettings({ ...googleSettings, lastSync: new Date().toISOString() });
+         } catch (err) {
+           console.error('[CalendarPage] Google Sync error during delete:', err);
+         }
+       }
+       setIsModalOpen(false);
+     }
+   };
 
   const renderWeekDays = () => {
     const days = [];
