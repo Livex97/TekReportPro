@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['/Users/alessio/Desktop/WorkAssistant/RapportiniApp/src-tauri/python/save_sterlink.py'],
+    ['/Users/alessio/Desktop/WorkAssistant/TekReportPro/src-tauri/python/save_sterlink.py'],
     pathex=[],
     binaries=[],
     datas=[],

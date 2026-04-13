@@ -91,6 +91,28 @@ function App() {
   const [updateDate, setUpdateDate] = useState<string | null>(null);
 
   // Form State
+
+  // Navigation color mapping for icons
+  const navColorMap: Record<View, {text: string; bg: string; hoverBg: string}> = {
+    home: {text: 'text-primary-600', bg: 'bg-primary-50 dark:bg-primary-900/30', hoverBg: ''},
+    templates: {text: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20', hoverBg: ''},
+    form: {text: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20', hoverBg: ''},
+    download: {text: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20', hoverBg: ''},
+    'ai-extraction': {text: 'text-purple-600', bg: 'bg-purple-50 dark:bg-purple-900/20', hoverBg: ''},
+    'sterlink-manager': {text: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20', hoverBg: ''},
+    'pandetta-manager': {text: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-900/20', hoverBg: ''},
+    calendar: {text: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20', hoverBg: ''},
+    settings: {text: 'text-neutral-600', bg: 'bg-neutral-100 dark:bg-neutral-800', hoverBg: ''},
+  };
+
+  const getNavClasses = (view: View) => {
+    const base = 'p-2 transition-colors rounded-lg';
+    const active = navColorMap[view];
+    const isActive = currentView === view;
+    return `${base} ${isActive ? `${active.text} ${active.bg}` : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'}`;
+  };
+
+// Form State
   const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [formFields, setFormFields] = useState<FormField[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
@@ -172,7 +194,7 @@ function App() {
           setUpdateBody(result.body || null);
           setUpdateDate(result.date || null);
           sendAppNotification("Nuovo Aggiornamento", `Versione ${result.latestVersion} disponibile!`);
-          
+
           if (updSettings.autoInstall) {
             installUpdate();
           }
@@ -376,7 +398,7 @@ function App() {
 
   const handleResetSettings = async () => {
     if (isProcessing || actionLock.current) return;
-    
+
     const confirmed = await ask("Tutti i settaggi (tecnici, percorsi, API) e i template verranno eliminati definitivamente. Procedere?", { title: 'RESET TOTALE', kind: 'warning' });
     if (!confirmed) return;
 
@@ -520,7 +542,7 @@ function App() {
               if (suffix === null) return;
 
               // Determine which prefix group this field belongs to
-              const prefixIdx = rowPrefixes.findIndex(p => 
+              const prefixIdx = rowPrefixes.findIndex(p =>
                 (labelMatch && field.label.startsWith(p.labelPrefix)) ||
                 (idMatch && field.id.startsWith(p.idPrefix))
               );
@@ -790,12 +812,12 @@ function App() {
     if (!googleAuthCode || !googleSettings?.clientId || !googleSettings?.clientSecret) {
       return;
     }
-    
+
     setIsProcessing(true);
     try {
       const { getTokensFromCode } = await import('./utils/googleCalendar');
       const tokens = await getTokensFromCode(googleAuthCode, googleSettings.clientId, googleSettings.clientSecret);
-      
+
       const updatedSettings = {
         ...googleSettings,
         accessToken: tokens.accessToken,
@@ -803,7 +825,7 @@ function App() {
         expiryDate: tokens.expiryDate,
         lastSync: new Date().toISOString()
       };
-      
+
       setGoogleSettingsState(updatedSettings);
       await setGoogleSettings(updatedSettings);
       setGoogleAuthCode('');
@@ -1027,95 +1049,67 @@ function App() {
               <FileIcon className="w-5 h-5 text-white" />
             </div>
             <h1 className="text-xl font-bold bg-gradient-to-r from-primary-700 to-primary-500 bg-clip-text text-transparent">
-              Rapportini<span className="font-light text-neutral-800 dark:text-neutral-200">Tech</span>
+              TekReport<span className="font-light text-neutral-800 dark:text-neutral-200">Pro</span>
             </h1>
           </div>
-           <div className="flex gap-2">
-             <button
-               onClick={() => navigateView('home')}
-               className={`p-2 transition-colors rounded-lg ${
-                 currentView === 'home'
-                   ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
-                   : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
-               }`}
-               title="Home"
-             >
-               <HomeIcon className="w-6 h-6" />
-             </button>
-              <button
-                onClick={() => navigateView('templates')}
-                className={`p-2 transition-colors rounded-lg ${
-                  currentView === 'templates' || currentView === 'form' || currentView === 'download'
-                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
-                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
-                }`}
-                title="Modelli Rapportino"
-              >
-                <FileText className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => navigateView('ai-extraction')}
-                className={`p-2 transition-colors rounded-lg ${
-                  currentView === 'ai-extraction'
-                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
-                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
-                }`}
-                title="Estrazione AI Automatica"
-              >
-                <Brain className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => navigateView('sterlink-manager')}
-                className={`p-2 transition-colors rounded-lg ${
-                  currentView === 'sterlink-manager'
-                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
-                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
-                }`}
-                title="Gestione Excel Sterlink"
-              >
-                <Database className="w-6 h-6" />
-              </button>
-               <button
-                onClick={() => navigateView('pandetta-manager')}
-                className={`p-2 transition-colors rounded-lg ${
-                  currentView === 'pandetta-manager'
-                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
-                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
-                }`}
-                title="Gestione Pandetta Assistenze"
-              >
-                <FileSpreadsheet className="w-6 h-6" />
-              </button>
-               <button
-                onClick={() => navigateView('calendar')}
-                className={`p-2 transition-colors rounded-lg ${
-                  currentView === 'calendar'
-                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
-                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
-                }`}
-                title="Calendario Lavori"
-              >
-                <Calendar className="w-6 h-6" />
-              </button>
-                <button
-                  onClick={() => navigateView('settings')}
-                  className={`p-2 transition-colors rounded-lg ${
-                    currentView === 'settings'
-                      ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
-                      : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
-                  }`}
-                  title="Impostazioni Template"
-                >
-                  <Settings className="w-6 h-6" />
-                </button>
-             <button
-               onClick={toggleTheme}
-               className="p-2 text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
-               title={theme === 'light' ? 'Tema Scuro' : 'Tema Chiaro'}
-             >
-               {theme === 'light' ? <Moon className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
-             </button>
-           </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigateView('home')}
+className={getNavClasses('home')}
+              title="Home"
+            >
+              <HomeIcon className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => navigateView('templates')}
+className={getNavClasses('templates')}
+              title="Modelli Rapportino"
+            >
+              <FileText className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => navigateView('ai-extraction')}
+className={getNavClasses('ai-extraction')}
+              title="Estrazione AI Automatica"
+            >
+              <Brain className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => navigateView('sterlink-manager')}
+className={getNavClasses('sterlink-manager')}
+              title="Gestione Excel Sterlink"
+            >
+              <Database className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => navigateView('pandetta-manager')}
+className={getNavClasses('pandetta-manager')}
+              title="Gestione Pandetta Assistenze"
+            >
+              <FileSpreadsheet className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => navigateView('calendar')}
+className={getNavClasses('calendar')}
+              title="Calendario Lavori"
+            >
+              <Calendar className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => navigateView('settings')}
+className={getNavClasses('settings')}
+              title="Impostazioni Template"
+            >
+              <Settings className="w-6 h-6" />
+            </button>
+            <button
+              onClick={toggleTheme}
+              className="p-2 text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
+              title={theme === 'light' ? 'Tema Scuro' : 'Tema Chiaro'}
+            >
+              {theme === 'light' ? <Moon className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1131,7 +1125,7 @@ function App() {
                 Benvenuto! Scegli a cosa vuoi lavorare oggi.
               </p>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto px-4">
               {[
                 { id: 'templates', title: 'Compilazione Rapportino', desc: 'Compila tramite i tuoi template (.docx).', icon: <FileText className="w-8 h-8 text-blue-600" />, iconBg: 'bg-blue-50 dark:bg-blue-900/20', hoverBorder: 'hover:border-blue-500 dark:hover:border-blue-500/50' },
@@ -1257,363 +1251,411 @@ function App() {
             </div>
 
             <div className="space-y-8">
-            {/* --- TAB: TEMPLATES --- */}
-            {activeSettingsTab === 'templates' && (
-              <>
-                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-100 dark:divide-neutral-700">
-                  {[1, 2, 3].map(slotNum => {
-                    const id = slotNum.toString();
-                    const meta = templateMeta[slotNum - 1];
+              {/* --- TAB: TEMPLATES --- */}
+              {activeSettingsTab === 'templates' && (
+                <>
+                  <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-100 dark:divide-neutral-700">
+                    {[1, 2, 3].map(slotNum => {
+                      const id = slotNum.toString();
+                      const meta = templateMeta[slotNum - 1];
 
-                    return (
-                      <div key={id} className="p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors">
-                        <div className="flex items-center gap-4 flex-1">
-                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 font-bold text-xl
-                        ${meta ? 'bg-primary-100 text-primary-600' : 'bg-neutral-100 text-neutral-400 dark:bg-neutral-700'}`}>
-                            {slotNum}
-                          </div>
-                          <div className="min-w-0">
-                            <h4 className="text-lg font-bold text-neutral-900 dark:text-white mb-1">Slot Template {slotNum}</h4>
-                            {meta ? (
-                              <p className="text-sm text-green-600 dark:text-green-400 font-medium flex items-center gap-1 truncate pb-1">
-                                <CheckCircle className="w-4 h-4 shrink-0" />
-                                {meta.name}
-                              </p>
-                            ) : (
-                              <p className="text-sm text-neutral-500">Nessun file assegnato.</p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3 w-full sm:w-auto">
-                          {meta && (
-                            <button
-                              onClick={() => handleDeleteSlot(id)}
-                              className="px-4 py-2 text-sm font-semibold rounded-lg transition-colors bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400"
-                            >
-                              Rimuovi
-                            </button>
-                          )}
-                          <div className="relative group overflow-hidden w-full sm:w-auto">
-                            <button
-                              onClick={() => handleSlotUpload(id)}
-                              disabled={isProcessing}
-                              className="w-full sm:w-auto px-6 py-2 text-sm font-bold text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-lg transition-colors shrink-0 disabled:opacity-50"
-                            >
-                              {meta ? 'Sostituisci' : 'Carica File DOCX'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* --- Personalizzazione Sezioni (Moved from AI/Broken block) --- */}
-                <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                      <Layout className="w-6 h-6 text-primary-600" />
-                      Personalizzazione Sezioni Rapportino
-                    </h3>
-                    <button
-                      onClick={async () => {
-                        setIsProcessing(true);
-                        await setSectionDefinitions(sectionDefinitions);
-                        setIsProcessing(false);
-                        setIsSectionsSaved(true);
-                        setTimeout(() => setIsSectionsSaved(false), 3000);
-                      }}
-                      className={`px-4 py-2 font-bold rounded-lg transition-all duration-300 flex items-center gap-2 text-sm shadow-sm 
-                    ${isSectionsSaved
-                          ? 'bg-emerald-600 text-white shadow-emerald-500/20'
-                          : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/20'}`}
-                    >
-                      {isSectionsSaved ? (
-                        <>
-                          <CheckCircle className="w-4 h-4" />
-                          Sezioni Salvate!
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4 shadow-sm" />
-                          Salva Sezioni
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Personalizza le sezioni appariranno nei template relativi ai Rapportini. Puoi cambiare i nomi e le icone.</p>
-
-                  <div className="space-y-4">
-                    {sectionDefinitions.map((sec, idx) => {
-                      const Icon = (LucideIcons as any)[sec.icon] || LucideIcons.HelpCircle;
                       return (
-                        <div key={sec.id} className="flex flex-col sm:flex-row gap-4 p-4 bg-neutral-50 dark:bg-neutral-700/50 rounded-xl border border-neutral-100 dark:border-neutral-700">
-                          <div className="flex items-center gap-3 flex-1">
-                            <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-600">
-                              <Icon className="w-5 h-5 text-primary-600" />
+                        <div key={id} className="p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors">
+                          <div className="flex items-center gap-4 flex-1">
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 font-bold text-xl
+                        ${meta ? 'bg-primary-100 text-primary-600' : 'bg-neutral-100 text-neutral-400 dark:bg-neutral-700'}`}>
+                              {slotNum}
                             </div>
-                            <div className="flex-1 space-y-2">
-                              <div className="flex gap-2">
-                                <div className="flex-1">
-                                  <label className="block text-[10px] uppercase font-black text-neutral-400 mb-1">Titolo Sezione</label>
-                                  <input
-                                    type="text"
-                                    value={sec.title}
-                                    onChange={(e) => {
-                                      const next = [...sectionDefinitions];
-                                      next[idx].title = e.target.value;
-                                      setSectionDefinitionsState(next);
-                                    }}
-                                    className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-1.5 text-sm dark:text-white"
-                                  />
-                                </div>
-                                <div className="w-32 relative">
-                                  <label className="block text-[10px] uppercase font-black text-neutral-400 mb-1">Icona</label>
-                                  <button
-                                    onClick={() => setIsIconPickerOpen(isIconPickerOpen === idx ? null : idx)}
-                                    className="w-full flex justify-between items-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-1.5 text-sm dark:text-white hover:border-primary-500 transition-colors"
-                                  >
-                                    <span className="truncate flex items-center gap-2 font-medium">
-                                      <Icon className="w-4 h-4" />
-                                      {sec.icon}
-                                    </span>
-                                    <ChevronDown className="w-4 h-4 text-neutral-400" />
-                                  </button>
-                                  {isIconPickerOpen === idx && (
-                                    <div className="absolute top-full mt-1 right-0 w-64 p-3 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl z-50 grid grid-cols-5 gap-2 max-h-48 overflow-y-auto">
-                                      {POPULAR_ICONS.map(i => {
-                                        const PreviewIcon = (LucideIcons as any)[i];
-                                        if (!PreviewIcon) return null;
-                                        return (
-                                          <button
-                                            key={i}
-                                            title={i}
-                                            onClick={() => {
-                                              const next = [...sectionDefinitions];
-                                              next[idx].icon = i;
-                                              setSectionDefinitionsState(next);
-                                              setIsIconPickerOpen(null);
-                                            }}
-                                            className={`p-2 rounded-lg flex justify-center items-center hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors ${sec.icon === i ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600' : 'text-neutral-600 dark:text-neutral-300'}`}
-                                          >
-                                            <PreviewIcon className="w-5 h-5" />
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
+                            <div className="min-w-0">
+                              <h4 className="text-lg font-bold text-neutral-900 dark:text-white mb-1">Slot Template {slotNum}</h4>
+                              {meta ? (
+                                <p className="text-sm text-green-600 dark:text-green-400 font-medium flex items-center gap-1 truncate pb-1">
+                                  <CheckCircle className="w-4 h-4 shrink-0" />
+                                  {meta.name}
+                                </p>
+                              ) : (
+                                <p className="text-sm text-neutral-500">Nessun file assegnato.</p>
+                              )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2 self-end sm:self-center">
-                            <button
-                              onClick={() => {
-                                if (idx === 0) return;
-                                const next = [...sectionDefinitions];
-                                [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-                                setSectionDefinitionsState(next);
-                              }}
-                              className="p-2 text-neutral-400 hover:text-primary-600"
-                            >
-                              <ChevronUp className="w-5 h-5" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (idx === sectionDefinitions.length - 1) return;
-                                const next = [...sectionDefinitions];
-                                [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-                                setSectionDefinitionsState(next);
-                              }}
-                              className="p-2 text-neutral-400 hover:text-primary-600"
-                            >
-                              <ChevronDown className="w-5 h-5" />
-                            </button>
-                            <button
-                              onClick={async () => {
-                                const confirmed = await ask(`Vuoi eliminare la sezione "${sec.title}"? Questo influisce solo sulla visualizzazione dei campi.`, { title: 'Elimina Sezione', kind: 'warning' });
-                                if (confirmed) {
-                                  setSectionDefinitionsState(sectionDefinitions.filter((_, i) => i !== idx));
-                                }
-                              }}
-                              className="p-2 text-neutral-400 hover:text-red-500"
-                            >
-                              <Trash2 className="w-5 h-5" />
-                            </button>
+
+                          <div className="flex items-center gap-3 w-full sm:w-auto">
+                            {meta && (
+                              <button
+                                onClick={() => handleDeleteSlot(id)}
+                                className="px-4 py-2 text-sm font-semibold rounded-lg transition-colors bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400"
+                              >
+                                Rimuovi
+                              </button>
+                            )}
+                            <div className="relative group overflow-hidden w-full sm:w-auto">
+                              <button
+                                onClick={() => handleSlotUpload(id)}
+                                disabled={isProcessing}
+                                className="w-full sm:w-auto px-6 py-2 text-sm font-bold text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white rounded-lg transition-colors shrink-0 disabled:opacity-50"
+                              >
+                                {meta ? 'Sostituisci' : 'Carica File DOCX'}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
                     })}
                   </div>
 
-                  <button
-                    onClick={() => {
-                      const newId = `custom_${Date.now()}`;
-                      setSectionDefinitionsState([...sectionDefinitions, { id: newId, title: 'Nuova Sezione', icon: 'Type' }]);
-                    }}
-                    className="mt-6 w-full py-3 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-xl text-neutral-500 hover:border-primary-500 hover:text-primary-500 transition-all font-bold flex items-center justify-center gap-2"
-                  >
-                    <Plus className="w-5 h-5" />
-                    Aggiungi Nuova Sezione
-                  </button>
-                </div>
-              </>
-            )}
+                  {/* --- Personalizzazione Sezioni (Moved from AI/Broken block) --- */}
+                  <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                        <Layout className="w-6 h-6 text-primary-600" />
+                        Personalizzazione Sezioni Rapportino
+                      </h3>
+                      <button
+                        onClick={async () => {
+                          setIsProcessing(true);
+                          await setSectionDefinitions(sectionDefinitions);
+                          setIsProcessing(false);
+                          setIsSectionsSaved(true);
+                          setTimeout(() => setIsSectionsSaved(false), 3000);
+                        }}
+                        className={`px-4 py-2 font-bold rounded-lg transition-all duration-300 flex items-center gap-2 text-sm shadow-sm 
+                    ${isSectionsSaved
+                            ? 'bg-emerald-600 text-white shadow-emerald-500/20'
+                            : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/20'}`}
+                      >
+                        {isSectionsSaved ? (
+                          <>
+                            <CheckCircle className="w-4 h-4" />
+                            Sezioni Salvate!
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 shadow-sm" />
+                            Salva Sezioni
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Personalizza le sezioni appariranno nei template relativi ai Rapportini. Puoi cambiare i nomi e le icone.</p>
 
-            {/* --- TAB: SYSTEM --- */}
-            {activeSettingsTab === 'system' && (
-              <>
-                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
-                    <User className="w-6 h-6 text-primary-600" />
-                    Gestione Tecnici
-                  </h3>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Aggiungi i nomi dei tecnici per poterli selezionare velocemente nei form.</p>
+                    <div className="space-y-4">
+                      {sectionDefinitions.map((sec, idx) => {
+                        const Icon = (LucideIcons as any)[sec.icon] || LucideIcons.HelpCircle;
+                        return (
+                          <div key={sec.id} className="flex flex-col sm:flex-row gap-4 p-4 bg-neutral-50 dark:bg-neutral-700/50 rounded-xl border border-neutral-100 dark:border-neutral-700">
+                            <div className="flex items-center gap-3 flex-1">
+                              <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-600">
+                                <Icon className="w-5 h-5 text-primary-600" />
+                              </div>
+                              <div className="flex-1 space-y-2">
+                                <div className="flex gap-2">
+                                  <div className="flex-1">
+                                    <label className="block text-[10px] uppercase font-black text-neutral-400 mb-1">Titolo Sezione</label>
+                                    <input
+                                      type="text"
+                                      value={sec.title}
+                                      onChange={(e) => {
+                                        const next = [...sectionDefinitions];
+                                        next[idx].title = e.target.value;
+                                        setSectionDefinitionsState(next);
+                                      }}
+                                      className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-1.5 text-sm dark:text-white"
+                                    />
+                                  </div>
+                                  <div className="w-32 relative">
+                                    <label className="block text-[10px] uppercase font-black text-neutral-400 mb-1">Icona</label>
+                                    <button
+                                      onClick={() => setIsIconPickerOpen(isIconPickerOpen === idx ? null : idx)}
+                                      className="w-full flex justify-between items-center bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg px-3 py-1.5 text-sm dark:text-white hover:border-primary-500 transition-colors"
+                                    >
+                                      <span className="truncate flex items-center gap-2 font-medium">
+                                        <Icon className="w-4 h-4" />
+                                        {sec.icon}
+                                      </span>
+                                      <ChevronDown className="w-4 h-4 text-neutral-400" />
+                                    </button>
+                                    {isIconPickerOpen === idx && (
+                                      <div className="absolute top-full mt-1 right-0 w-64 p-3 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl z-50 grid grid-cols-5 gap-2 max-h-48 overflow-y-auto">
+                                        {POPULAR_ICONS.map(i => {
+                                          const PreviewIcon = (LucideIcons as any)[i];
+                                          if (!PreviewIcon) return null;
+                                          return (
+                                            <button
+                                              key={i}
+                                              title={i}
+                                              onClick={() => {
+                                                const next = [...sectionDefinitions];
+                                                next[idx].icon = i;
+                                                setSectionDefinitionsState(next);
+                                                setIsIconPickerOpen(null);
+                                              }}
+                                              className={`p-2 rounded-lg flex justify-center items-center hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors ${sec.icon === i ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600' : 'text-neutral-600 dark:text-neutral-300'}`}
+                                            >
+                                              <PreviewIcon className="w-5 h-5" />
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 self-end sm:self-center">
+                              <button
+                                onClick={() => {
+                                  if (idx === 0) return;
+                                  const next = [...sectionDefinitions];
+                                  [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                                  setSectionDefinitionsState(next);
+                                }}
+                                className="p-2 text-neutral-400 hover:text-primary-600"
+                              >
+                                <ChevronUp className="w-5 h-5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (idx === sectionDefinitions.length - 1) return;
+                                  const next = [...sectionDefinitions];
+                                  [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+                                  setSectionDefinitionsState(next);
+                                }}
+                                className="p-2 text-neutral-400 hover:text-primary-600"
+                              >
+                                <ChevronDown className="w-5 h-5" />
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  const confirmed = await ask(`Vuoi eliminare la sezione "${sec.title}"? Questo influisce solo sulla visualizzazione dei campi.`, { title: 'Elimina Sezione', kind: 'warning' });
+                                  if (confirmed) {
+                                    setSectionDefinitionsState(sectionDefinitions.filter((_, i) => i !== idx));
+                                  }
+                                }}
+                                className="p-2 text-neutral-400 hover:text-red-500"
+                              >
+                                <Trash2 className="w-5 h-5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
 
-                  <div className="flex gap-3 mb-6">
-                    <input
-                      type="text"
-                      value={newTechName}
-                      onChange={(e) => setNewTechName(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleAddTechnician()}
-                      placeholder="Nome Tecnico (es. Mario Rossi)"
-                      className="flex-1 px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none bg-transparent dark:text-white"
-                    />
                     <button
-                      onClick={handleAddTechnician}
-                      className="px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
+                      onClick={() => {
+                        const newId = `custom_${Date.now()}`;
+                        setSectionDefinitionsState([...sectionDefinitions, { id: newId, title: 'Nuova Sezione', icon: 'Type' }]);
+                      }}
+                      className="mt-6 w-full py-3 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-xl text-neutral-500 hover:border-primary-500 hover:text-primary-500 transition-all font-bold flex items-center justify-center gap-2"
                     >
                       <Plus className="w-5 h-5" />
-                      Aggiungi
+                      Aggiungi Nuova Sezione
                     </button>
                   </div>
+                </>
+              )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {technicians.map((name, index) => (
-                      <div key={index} className="flex items-center justify-between p-3 bg-neutral-50 dark:bg-neutral-700/50 rounded-lg border border-neutral-100 dark:border-neutral-700 group">
-                        <span className="font-medium text-neutral-700 dark:text-neutral-200">{name}</span>
-                        <button
-                          onClick={() => handleRemoveTechnician(index)}
-                          className="p-1.5 text-neutral-400 hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                    {technicians.length === 0 && (
-                      <div className="col-span-full py-4 text-center text-neutral-400 italic">
-                        Nessun tecnico aggiunto.
-                      </div>
-                    )}
-                  </div>
-                </div>
+              {/* --- TAB: SYSTEM --- */}
+              {activeSettingsTab === 'system' && (
+                <>
+                  <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
+                      <User className="w-6 h-6 text-primary-600" />
+                      Gestione Tecnici
+                    </h3>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Aggiungi i nomi dei tecnici per poterli selezionare velocemente nei form.</p>
 
-                <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
-                    <Download className="w-6 h-6 text-primary-600" />
-                    Percorso di Salvataggio Predefinito
-                  </h3>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Seleziona la cartella in cui verranno salvati i documenti generati.</p>
-
-                   <div className="flex gap-3 items-center">
-                     <div className="relative flex-1">
-                       <input
-                         type="text"
-                         readOnly
-                         value={savePath || 'Nessuna cartella selezionata...'}
-                         className="w-full px-4 py-2 pr-8 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
-                       />
-                       {savePath && savePath.trim() !== '' && (
-                         <button
-                           onClick={async () => {
-                             setSavePathState('');
-                             await setSavePath('');
-                           }}
-                           className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-600 dark:text-neutral-500 rounded transition-colors"
-                           title="Rimuovi percorso"
-                         >
-                           <X className="w-4 h-4" />
-                         </button>
-                       )}
-                     </div>
-                     <button
-                       onClick={async () => {
-                         const selected = await open({
-                           directory: true,
-                           multiple: false,
-                         });
-                         if (selected && typeof selected === 'string') {
-                           setSavePathState(selected);
-                           await setSavePath(selected);
-                         }
-                       }}
-                       className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
-                     >
-                       Sfoglia Cartella
-                     </button>
-                   </div>
-                </div>
-              </>
-            )}
-
-            {/* --- TAB: MANAGERS --- */}
-            {activeSettingsTab === 'database' && (
-              <div className="space-y-8">
-                {/* Pandetta Manager Settings */}
-                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center">
-                      <Database className="w-6 h-6 text-blue-600" />
+                    <div className="flex gap-3 mb-6">
+                      <input
+                        type="text"
+                        value={newTechName}
+                        onChange={(e) => setNewTechName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddTechnician()}
+                        placeholder="Nome Tecnico (es. Mario Rossi)"
+                        className="flex-1 px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none bg-transparent dark:text-white"
+                      />
+                      <button
+                        onClick={handleAddTechnician}
+                        className="px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
+                      >
+                        <Plus className="w-5 h-5" />
+                        Aggiungi
+                      </button>
                     </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Pandetta Manager</h3>
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400">Configurazione database e file sorgente per Pandetta.</p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {technicians.map((name, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-neutral-50 dark:bg-neutral-700/50 rounded-lg border border-neutral-100 dark:border-neutral-700 group">
+                          <span className="font-medium text-neutral-700 dark:text-neutral-200">{name}</span>
+                          <button
+                            onClick={() => handleRemoveTechnician(index)}
+                            className="p-1.5 text-neutral-400 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      {technicians.length === 0 && (
+                        <div className="col-span-full py-4 text-center text-neutral-400 italic">
+                          Nessun tecnico aggiunto.
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="space-y-6">
-                    <div>
-                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <Save className="w-3 h-3" />
-                        Database CSV Destinazione (Output)
-                      </label>
-                      <div className="flex gap-3 items-center">
-                        <div className="relative flex-1">
-                          <input
-                            type="text"
-                            readOnly
-                            value={csvPath || 'Nessun file selezionato...'}
-                            className="w-full px-4 py-2 pr-8 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
-                          />
-                          {csvPath && csvPath.trim() !== '' && (
+                  <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
+                      <Download className="w-6 h-6 text-primary-600" />
+                      Percorso di Salvataggio Predefinito
+                    </h3>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Seleziona la cartella in cui verranno salvati i documenti generati.</p>
+
+                    <div className="flex gap-3 items-center">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          readOnly
+                          value={savePath || 'Nessuna cartella selezionata...'}
+                          className="w-full px-4 py-2 pr-8 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
+                        />
+                        {savePath && savePath.trim() !== '' && (
+                          <button
+                            onClick={async () => {
+                              setSavePathState('');
+                              await setSavePath('');
+                            }}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-600 dark:text-neutral-500 rounded transition-colors"
+                            title="Rimuovi percorso"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const selected = await open({
+                            directory: true,
+                            multiple: false,
+                          });
+                          if (selected && typeof selected === 'string') {
+                            setSavePathState(selected);
+                            await setSavePath(selected);
+                          }
+                        }}
+                        className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
+                      >
+                        Sfoglia Cartella
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* --- TAB: MANAGERS --- */}
+              {activeSettingsTab === 'database' && (
+                <div className="space-y-8">
+                  {/* Pandetta Manager Settings */}
+                  <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center">
+                        <Database className="w-6 h-6 text-blue-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Pandetta Manager</h3>
+                        <p className="text-sm text-neutral-500 dark:text-neutral-400">Configurazione database e file sorgente per Pandetta.</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-6">
+                      <div>
+                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                          <Save className="w-3 h-3" />
+                          Database CSV Destinazione (Output)
+                        </label>
+                        <div className="flex gap-3 items-center">
+                          <div className="relative flex-1">
+                            <input
+                              type="text"
+                              readOnly
+                              value={csvPath || 'Nessun file selezionato...'}
+                              className="w-full px-4 py-2 pr-8 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
+                            />
+                            {csvPath && csvPath.trim() !== '' && (
+                              <button
+                                onClick={async () => {
+                                  setCsvPathState('');
+                                  await setCsvPath('');
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-600 dark:text-neutral-500 rounded transition-colors"
+                                title="Rimuovi percorso"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            onClick={async () => {
+                              const selected = await open({
+                                multiple: false,
+                                filters: [{ name: 'CSV Document', extensions: ['csv'] }]
+                              });
+                              if (selected && typeof selected === 'string') {
+                                setCsvPathState(selected);
+                                await setCsvPath(selected);
+                              }
+                            }}
+                            className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
+                          >
+                            Seleziona CSV
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                              <FileSpreadsheet className="w-5 h-5 text-blue-600" />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Dataset Persistente (Excel)</h4>
+                              <p className="text-xs text-neutral-500">{pandettaFileName || 'Nessun file caricato (utilizza la pagina Pandetta Manager)'}</p>
+                            </div>
+                          </div>
+                          {(pandettaFileName || pandettaFilePath) && (
                             <button
                               onClick={async () => {
-                                setCsvPathState('');
-                                await setCsvPath('');
+                                const confirmed = await ask("Vuoi davvero rimuovere il file Excel persistente per Pandetta Manager? Dovrai caricarlo nuovamente per utilizzare la pagina.", { title: 'Rimuovi Cache Pandetta', kind: 'warning' });
+                                if (confirmed) {
+                                  await clearExcelFile('pandetta');
+                                  setPandettaFileName(null);
+                                  setPandettaFilePath(null);
+                                }
                               }}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-600 dark:text-neutral-500 rounded transition-colors"
-                              title="Rimuovi percorso"
+                              className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded-lg transition-colors border border-red-200 dark:border-red-800"
                             >
-                              <X className="w-4 h-4" />
+                              Dimentica File
                             </button>
                           )}
                         </div>
-                        <button
-                          onClick={async () => {
-                            const selected = await open({
-                              multiple: false,
-                              filters: [{ name: 'CSV Document', extensions: ['csv'] }]
-                            });
-                            if (selected && typeof selected === 'string') {
-                              setCsvPathState(selected);
-                              await setCsvPath(selected);
-                            }
-                          }}
-                          className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
-                        >
-                          Seleziona CSV
-                        </button>
+                        {pandettaFilePath && (
+                          <p className="mt-2 text-[10px] text-neutral-400 bg-neutral-100 dark:bg-neutral-800/50 p-2 rounded-lg break-all font-mono">
+                            {pandettaFilePath}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sterlink Manager Settings */}
+                  <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center">
+                        <Layout className="w-6 h-6 text-emerald-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Sterlink Manager</h3>
+                        <p className="text-sm text-neutral-500 dark:text-neutral-400">Configurazione file sorgente per Sterlink.</p>
                       </div>
                     </div>
 
@@ -1621,21 +1663,21 @@ function App() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
-                            <FileSpreadsheet className="w-5 h-5 text-blue-600" />
+                            <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
                           </div>
                           <div>
                             <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Dataset Persistente (Excel)</h4>
-                            <p className="text-xs text-neutral-500">{pandettaFileName || 'Nessun file caricato (utilizza la pagina Pandetta Manager)'}</p>
+                            <p className="text-xs text-neutral-500">{sterlinkFileName || 'Nessun file caricato (utilizza la pagina Sterlink Manager)'}</p>
                           </div>
                         </div>
-                        {(pandettaFileName || pandettaFilePath) && (
+                        {(sterlinkFileName || sterlinkFilePath) && (
                           <button
                             onClick={async () => {
-                              const confirmed = await ask("Vuoi davvero rimuovere il file Excel persistente per Pandetta Manager? Dovrai caricarlo nuovamente per utilizzare la pagina.", { title: 'Rimuovi Cache Pandetta', kind: 'warning' });
+                              const confirmed = await ask("Vuoi davvero rimuovere il file Excel persistente per Sterlink Manager? Dovrai caricarlo nuovamente per utilizzare la pagina.", { title: 'Rimuovi Cache Sterlink', kind: 'warning' });
                               if (confirmed) {
-                                await clearExcelFile('pandetta');
-                                setPandettaFileName(null);
-                                setPandettaFilePath(null);
+                                await clearExcelFile('sterlink');
+                                setSterlinkFileName(null);
+                                setSterlinkFilePath(null);
                               }
                             }}
                             className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded-lg transition-colors border border-red-200 dark:border-red-800"
@@ -1644,702 +1686,654 @@ function App() {
                           </button>
                         )}
                       </div>
-                      {pandettaFilePath && (
+                      {sterlinkFilePath && (
                         <p className="mt-2 text-[10px] text-neutral-400 bg-neutral-100 dark:bg-neutral-800/50 p-2 rounded-lg break-all font-mono">
-                          {pandettaFilePath}
+                          {sterlinkFilePath}
                         </p>
                       )}
                     </div>
                   </div>
-                </div>
 
-                {/* Sterlink Manager Settings */}
-                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center">
-                      <Layout className="w-6 h-6 text-emerald-600" />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Sterlink Manager</h3>
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400">Configurazione file sorgente per Sterlink.</p>
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
-                          <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Dataset Persistente (Excel)</h4>
-                          <p className="text-xs text-neutral-500">{sterlinkFileName || 'Nessun file caricato (utilizza la pagina Sterlink Manager)'}</p>
-                        </div>
+                  {/* storage location info */}
+                  <div className="p-6 bg-neutral-100 dark:bg-neutral-900/50 rounded-2xl border border-neutral-200 dark:border-neutral-700">
+                    <div className="flex items-start gap-4">
+                      <Server className="w-6 h-6 text-neutral-400 mt-1" />
+                      <div>
+                        <h4 className="text-sm font-bold text-neutral-700 dark:text-neutral-300">Posizione Dati Locali</h4>
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                          I dataset sono memorizzati in locale nella cartella dei dati dell'applicazione per garantirti un accesso rapido ed offline.
+                          I file originali non vengono modificati.
+                        </p>
                       </div>
-                      {(sterlinkFileName || sterlinkFilePath) && (
-                        <button
-                          onClick={async () => {
-                            const confirmed = await ask("Vuoi davvero rimuovere il file Excel persistente per Sterlink Manager? Dovrai caricarlo nuovamente per utilizzare la pagina.", { title: 'Rimuovi Cache Sterlink', kind: 'warning' });
-                            if (confirmed) {
-                              await clearExcelFile('sterlink');
-                              setSterlinkFileName(null);
-                              setSterlinkFilePath(null);
-                            }
-                          }}
-                          className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded-lg transition-colors border border-red-200 dark:border-red-800"
-                        >
-                          Dimentica File
-                        </button>
-                      )}
-                    </div>
-                    {sterlinkFilePath && (
-                      <p className="mt-2 text-[10px] text-neutral-400 bg-neutral-100 dark:bg-neutral-800/50 p-2 rounded-lg break-all font-mono">
-                        {sterlinkFilePath}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* storage location info */}
-                <div className="p-6 bg-neutral-100 dark:bg-neutral-900/50 rounded-2xl border border-neutral-200 dark:border-neutral-700">
-                  <div className="flex items-start gap-4">
-                    <Server className="w-6 h-6 text-neutral-400 mt-1" />
-                    <div>
-                      <h4 className="text-sm font-bold text-neutral-700 dark:text-neutral-300">Posizione Dati Locali</h4>
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                        I dataset sono memorizzati in locale nella cartella dei dati dell'applicazione per garantirti un accesso rapido ed offline.
-                        I file originali non vengono modificati.
-                      </p>
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
 
-            {/* --- TAB: INTEGRATIONS --- */}
-            {activeSettingsTab === 'integrations' && (
-              <>
-                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                      <Brain className="w-6 h-6 text-primary-600" />
-                      Impostazioni Intelligenza Artificiale
-                    </h3>
-                    <button
-                      onClick={async () => {
-                        setIsProcessing(true);
-                        await setAiSettings(aiSettings);
-                        setIsProcessing(false);
-                        setIsAiSaved(true);
-                        setTimeout(() => setIsAiSaved(false), 3000);
-                      }}
-                      className={`px-4 py-2 font-bold rounded-lg transition-all duration-300 flex items-center gap-2 text-sm shadow-sm 
+              {/* --- TAB: INTEGRATIONS --- */}
+              {activeSettingsTab === 'integrations' && (
+                <>
+                  <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                        <Brain className="w-6 h-6 text-primary-600" />
+                        Impostazioni Intelligenza Artificiale
+                      </h3>
+                      <button
+                        onClick={async () => {
+                          setIsProcessing(true);
+                          await setAiSettings(aiSettings);
+                          setIsProcessing(false);
+                          setIsAiSaved(true);
+                          setTimeout(() => setIsAiSaved(false), 3000);
+                        }}
+                        className={`px-4 py-2 font-bold rounded-lg transition-all duration-300 flex items-center gap-2 text-sm shadow-sm 
                     ${isAiSaved
-                          ? 'bg-emerald-600 text-white shadow-emerald-500/20'
-                          : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/20'}`}
-                    >
-                      {isAiSaved ? (
-                        <>
-                          <CheckCircle className="w-4 h-4" />
-                          Impostazioni Salvate!
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4 shadow-sm" />
-                          Salva Impostazioni AI
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Configura i parametri per la connessione a Ollama.</p>
-
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
-                          <Bell className={`w-5 h-5 ${aiSettings.notificationsEnabled ? 'text-primary-600' : 'text-neutral-400'}`} />
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Notifiche Completamento</h4>
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs text-neutral-500">Invia una notifica quando l'analisi IA è terminata.</p>
-                            {aiSettings.notificationsEnabled && (
-                              <button
-                                onClick={() => sendAppNotification("Test Notifica", "Se vedi questo, le notifiche funzionano!")}
-                                className="text-[10px] bg-neutral-200 dark:bg-neutral-700 px-2 py-0.5 rounded hover:bg-neutral-300 transition-colors"
-                              >
-                                Invia Test
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          const newValue = !aiSettings.notificationsEnabled;
-                          if (newValue) {
-                            try {
-                              // requestPermission and isPermissionGranted are statically imported
-                              let hasPermission = await isPermissionGranted();
-                              if (!hasPermission) await requestPermission();
-                            } catch (e) {
-                              console.error('Notification plugin error:', e);
-                            }
-                          }
-                          setAiSettingsState({ ...aiSettings, notificationsEnabled: newValue });
-                        }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500
-                      ${aiSettings.notificationsEnabled ? 'bg-primary-600' : 'bg-neutral-300 dark:bg-neutral-600'}`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
-                        ${aiSettings.notificationsEnabled ? 'translate-x-6' : 'translate-x-1'}`}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Endpoint Ollama URL</label>
-                        <input
-                          type="text"
-                          value={aiSettings.ollamaUrl}
-                          onChange={(e) => setAiSettingsState({ ...aiSettings, ollamaUrl: e.target.value })}
-                          className="w-full px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Modello (Model Name)</label>
-                        <input
-                          type="text"
-                          value={aiSettings.ollamaModel}
-                          onChange={(e) => setAiSettingsState({ ...aiSettings, ollamaModel: e.target.value })}
-                          className="w-full px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Temperatura ({aiSettings.temperature})</label>
-                        <input
-                          type="range" min="0" max="1" step="0.1"
-                          value={aiSettings.temperature}
-                          onChange={(e) => setAiSettingsState({ ...aiSettings, temperature: parseFloat(e.target.value) })}
-                          className="w-full h-2 bg-neutral-200 dark:bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-primary-600"
-                        />
-                        <div className="flex justify-between text-[10px] text-neutral-400 mt-1">
-                          <span>Rigoroso (0)</span>
-                          <span>Creativo (1)</span>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Max Tokens ({aiSettings.numPredict})</label>
-                        <input
-                          type="number"
-                          min="0"
-                          max="4096"
-                          value={aiSettings.numPredict}
-                          onChange={(e) => setAiSettingsState({ ...aiSettings, numPredict: parseInt(e.target.value) || 0 })}
-                          className="w-full px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex justify-between items-center mb-2">
-                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest">Istruzioni di Sistema (Custom Prompt Override)</label>
-                        <button
-                          onClick={() => setAiSettingsState({ ...aiSettings, systemPrompt: '' })}
-                          className="text-[10px] font-bold text-primary-600 hover:text-primary-700 underline"
-                        >
-                          Ripristina Default
-                        </button>
-                      </div>
-                      <textarea
-                        value={aiSettings.systemPrompt || ''}
-                        onChange={(e) => setAiSettingsState({ ...aiSettings, systemPrompt: e.target.value })}
-                        placeholder="Il testo inserito qui sovrascriverà il prompt di default..."
-                        className="w-full h-48 px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 resize-none font-mono text-xs"
-                      />
-
-                      {!aiSettings.systemPrompt && (
-                        <div className="mt-4 p-4 bg-neutral-50 dark:bg-neutral-900/50 rounded-xl border border-neutral-100 dark:border-neutral-700">
-                          <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                            <Brain className="w-3 h-3" />
-                            Prompt In Uso (Default):
-                          </p>
-                          <pre className="text-[10px] text-neutral-500 whitespace-pre-wrap font-sans leading-relaxed italic">
-                            {DEFAULT_SYSTEM_PROMPT}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* --- TAB: INTEGRATIONS (SYNC) --- */}
-            {activeSettingsTab === 'integrations' && (
-              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <div className="flex items-center justify-between mb-8">
-                    <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl flex items-center justify-center border border-emerald-100 dark:border-emerald-800 shadow-sm">
-                        <Cloud className="w-7 h-7 text-emerald-600" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-black text-neutral-900 dark:text-white">Sincronizzazione Google Calendar</h3>
-                        <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Configura le chiavi API per mantenere sincronizzati i tuoi lavori.</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {googleSettings?.refreshToken && (
-                        <button
-                          onClick={handleManualSync}
-                          disabled={isSyncing}
-                          className={`px-4 py-3 font-bold rounded-xl transition-all duration-300 flex items-center gap-2 text-sm border-2
-                            ${isSyncing ? 'bg-neutral-50 text-neutral-400 border-neutral-100' : 'bg-white text-neutral-600 border-neutral-100 hover:border-emerald-500 hover:text-emerald-600'}`}
-                        >
-                          <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                          Forza Sincronizzazione
-                        </button>
-                      )}
-                      <button
-                        onClick={async () => {
-                          if (googleSettings) {
-                            setIsProcessing(true);
-                            await setGoogleSettings(googleSettings);
-                            setIsProcessing(false);
-                            setIsGoogleSaved(true);
-                            setTimeout(() => setIsGoogleSaved(false), 3000);
-                          }
-                        }}
-                        className={`px-6 py-3 font-black rounded-xl transition-all duration-300 flex items-center gap-2 text-sm shadow-lg
-                        ${isGoogleSaved
                             ? 'bg-emerald-600 text-white shadow-emerald-500/20'
-                            : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/20 active:scale-95'}`}
+                            : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/20'}`}
                       >
-                        {isGoogleSaved ? (
+                        {isAiSaved ? (
                           <>
                             <CheckCircle className="w-4 h-4" />
-                            Salvato!
+                            Impostazioni Salvate!
                           </>
                         ) : (
                           <>
-                            <Save className="w-4 h-4" />
-                            Salva Impostazioni
+                            <Download className="w-4 h-4 shadow-sm" />
+                            Salva Impostazioni AI
                           </>
                         )}
                       </button>
                     </div>
-                  </div>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Configura i parametri per la connessione a Ollama.</p>
 
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between p-6 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-3xl">
-                      <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all shadow-sm ${googleSettings?.enabled && googleSettings?.refreshToken ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600' : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400'}`}>
-                          <RefreshCw className={`w-6 h-6 ${googleSettings?.enabled && googleSettings?.refreshToken ? 'animate-spin-slow' : ''}`} />
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-black text-neutral-900 dark:text-white">Sincronizzazione Automatica</h4>
-                          <p className={`text-xs font-bold ${googleSettings?.refreshToken ? 'text-emerald-600' : 'text-neutral-500'}`}>
-                            {googleSettings?.refreshToken ? 'App autorizzata e pronta.' : 'Richiede autorizzazione.'}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          if (googleSettings) {
-                            setGoogleSettingsState({ ...googleSettings, enabled: !googleSettings.enabled });
-                          }
-                        }}
-                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all focus:outline-none shadow-inner
-                        ${googleSettings?.enabled ? 'bg-emerald-600' : 'bg-neutral-300 dark:bg-neutral-700'}`}
-                      >
-                        <span
-                          className={`inline-block h-5 w-5 transform rounded-full bg-white transition-all shadow-md
-                          ${googleSettings?.enabled ? 'translate-x-6' : 'translate-x-1'}`}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest ml-1">Google Client ID</label>
-                        <input
-                          type="password"
-                          value={googleSettings?.clientId || ''}
-                          onChange={(e) => setGoogleSettingsState(googleSettings ? { ...googleSettings, clientId: e.target.value } : null)}
-                          placeholder="Inserisci il tuo Client ID"
-                          className="w-full px-5 py-3.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl outline-none focus:border-primary-500 dark:focus:border-primary-500 text-neutral-800 dark:text-white font-mono text-xs shadow-inner transition-all"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest ml-1">Google Client Secret</label>
-                        <input
-                          type="password"
-                          value={googleSettings?.clientSecret || ''}
-                          onChange={(e) => setGoogleSettingsState(googleSettings ? { ...googleSettings, clientSecret: e.target.value } : null)}
-                          placeholder="Inserisci il tuo Client Secret"
-                          className="w-full px-5 py-3.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl outline-none focus:border-primary-500 dark:focus:border-primary-500 text-neutral-800 dark:text-white font-mono text-xs shadow-inner transition-all"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Step de Autenticazione */}
-                    {!googleSettings?.refreshToken ? (
-                      <div className="p-8 bg-primary-50/30 dark:bg-primary-900/10 rounded-3xl border border-primary-100 dark:border-primary-800/50">
-                        <div className="flex flex-col md:flex-row items-center gap-8">
-                          <div className="flex-1 space-y-4">
-                            <h4 className="text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
-                              <LucideIcons.Lock className="w-5 h-5 text-primary-600" />
-                              Autorizzazione Necessaria
-                            </h4>
-                            <p className="text-sm text-neutral-500 dark:text-neutral-400 leading-relaxed font-medium">
-                              Per collegare il tuo account, dopo aver salvato il Client ID e Secret:
-                              <br />
-                              1. Clicca su <strong>"Autorizza App"</strong>
-                              <br />
-                              2. Accetta le autorizzazioni nel browser
-                              <br />
-                              3. Copia il codice fornito e incollalo qui sotto
-                            </p>
-                            <button
-                              onClick={handleGoogleAuth}
-                              disabled={!googleSettings?.clientId || !googleSettings?.clientSecret}
-                              className="px-6 py-3 bg-white dark:bg-neutral-800 border-2 border-primary-200 text-primary-600 font-black rounded-xl hover:bg-primary-50 transition-all disabled:opacity-30 flex items-center gap-2 shadow-sm"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                              Autorizza App
-                            </button>
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                            <Bell className={`w-5 h-5 ${aiSettings.notificationsEnabled ? 'text-primary-600' : 'text-neutral-400'}`} />
                           </div>
-                          <div className="w-full md:w-1/2 space-y-3">
-                            <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Incolla qui il codice di autorizzazione</label>
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                value={googleAuthCode}
-                                onChange={(e) => setGoogleAuthCode(e.target.value)}
-                                placeholder="Codice Google..."
-                                className="flex-1 px-5 py-3.5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl outline-none focus:border-emerald-500 text-xs font-mono"
-                              />
-                              <button
-                                onClick={handleVerifyGoogleCode}
-                                disabled={!googleAuthCode || isProcessing}
-                                className="px-5 bg-emerald-600 text-white font-black rounded-2xl hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                              >
-                                Verifica
-                              </button>
+                          <div>
+                            <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Notifiche Completamento</h4>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs text-neutral-500">Invia una notifica quando l'analisi IA è terminata.</p>
+                              {aiSettings.notificationsEnabled && (
+                                <button
+                                  onClick={() => sendAppNotification("Test Notifica", "Se vedi questo, le notifiche funzionano!")}
+                                  className="text-[10px] bg-neutral-200 dark:bg-neutral-700 px-2 py-0.5 rounded hover:bg-neutral-300 transition-colors"
+                                >
+                                  Invia Test
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="p-6 bg-emerald-50/50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800/50 rounded-3xl flex items-center justify-between">
-                         <div className="flex items-center gap-4">
-                           <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/40 rounded-2xl flex items-center justify-center text-emerald-600">
-                             <CheckCircle className="w-6 h-6" />
-                           </div>
-                           <div>
-                             <h4 className="text-sm font-black text-neutral-900 dark:text-white">Account Collegato Correttamente</h4>
-                             <p className="text-xs font-bold text-emerald-600/80">Ultima sincronizzazione: {googleSettings.lastSync ? new Date(googleSettings.lastSync).toLocaleString('it-IT') : 'Nessuna'}</p>
-                           </div>
-                         </div>
-                         <button
-                           onClick={async () => {
-                             const confirmed = await ask("Vuoi davvero scollegare l'account Google? I dati locali rimarranno intatti ma la sincronizzazione si fermerà.", { title: 'Scollega Account', kind: 'warning' });
-                             if (confirmed) {
-                               const reset = { ...googleSettings, refreshToken: '', accessToken: '', expiryDate: 0, enabled: false };
-                               setGoogleSettingsState(reset);
-                               await setGoogleSettings(reset);
-                             }
-                           }}
-                           className="text-xs font-black text-red-500 hover:text-red-600 transition-colors bg-white dark:bg-neutral-800 px-4 py-2 rounded-xl border border-red-100 dark:border-red-900/30"
-                         >
-                           Scollega Account
-                         </button>
-                      </div>
-                    )}
-
-                    <div className="flex items-start gap-3 p-4 bg-yellow-50/50 dark:bg-yellow-900/10 border border-yellow-100 dark:border-yellow-800/30 rounded-2xl">
-                      <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 shrink-0" />
-                      <p className="text-[10px] font-bold text-yellow-800/80 dark:text-yellow-500/80 leading-relaxed">
-                        Nota: Assicurati che l'app sia in modalità "Produzione" nella Console Google per evitare che i token scadano dopo 7 giorni. 
-                        In alternativa, aggiungi il tuo indirizzo email come "Test User".
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeSettingsTab === 'system' && (
-              <>
-                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                      <RefreshCw className="w-6 h-6 text-primary-600" />
-                      Aggiornamenti Applicazione
-                    </h3>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={async () => {
-                          setUpdateStatus('checking');
-                          const result = await checkForUpdates();
-                          if (result.available) {
-                            setUpdateStatus('available');
-                            setLatestVersion(result.latestVersion || '');
-                            setUpdateBody(result.body || null);
-                            setUpdateDate(result.date || null);
-                          } else {
-                            setUpdateStatus('up-to-date');
-                          }
-                        }}
-                        disabled={updateStatus === 'checking' || isProcessing}
-                        className="px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 text-sm disabled:opacity-50"
-                      >
-                        {updateStatus === 'checking' ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            Verifica...
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="w-4 h-4" />
-                            Controlla Aggiornamenti
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Verifica la disponibilità di nuove versioni dell'applicazione e installa gli aggiornamenti automaticamente.</p>
-
-                  <div className="space-y-6">
-                    {/* Current Version Display */}
-                    <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
-                          <Package className="w-5 h-5 text-primary-600" />
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Versione Corrente</h4>
-                          <p className="text-xs text-neutral-500">{currentVersion || 'Caricamento...'}</p>
-                        </div>
-                      </div>
-                      {latestVersion && (
-                        <div className="text-right">
-                          <p className="text-xs font-bold text-primary-600">Nuova: {latestVersion}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Update Status & Actions */}
-                    {updateStatus === 'available' && (
-                      <div className="p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-xl">
-                        <div className="flex items-start gap-3 mb-3">
-                          <div className="w-8 h-8 bg-primary-100 dark:bg-primary-900/50 rounded-full flex items-center justify-center shrink-0">
-                            <Download className="w-4 h-4 text-primary-600" />
-                          </div>
-                          <div className="flex-1">
-                            <h4 className="text-sm font-bold text-primary-800 dark:text-primary-400 mb-1">Aggiornamento Disponibile!</h4>
-                            {updateBody && (
-                              <p className="text-xs text-primary-700 dark:text-primary-500 mb-2">{updateBody}</p>
-                            )}
-                            {updateDate && (
-                              <p className="text-[10px] text-primary-600/70 dark:text-primary-500/70">
-                                Pubblicato: {new Date(updateDate).toLocaleDateString('it-IT')}
-                              </p>
-                            )}
-                          </div>
-                        </div>
                         <button
                           onClick={async () => {
-                            setIsProcessing(true);
-                            try {
-                              await installUpdate();
-                              setUpdateStatus('downloaded');
-                            } catch (e) {
-                              console.error('Install error:', e);
-                              setUpdateStatus('error');
-                            } finally {
+                            const newValue = !aiSettings.notificationsEnabled;
+                            if (newValue) {
+                              try {
+                                // requestPermission and isPermissionGranted are statically imported
+                                let hasPermission = await isPermissionGranted();
+                                if (!hasPermission) await requestPermission();
+                              } catch (e) {
+                                console.error('Notification plugin error:', e);
+                              }
+                            }
+                            setAiSettingsState({ ...aiSettings, notificationsEnabled: newValue });
+                          }}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500
+                      ${aiSettings.notificationsEnabled ? 'bg-primary-600' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                        ${aiSettings.notificationsEnabled ? 'translate-x-6' : 'translate-x-1'}`}
+                          />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Endpoint Ollama URL</label>
+                          <input
+                            type="text"
+                            value={aiSettings.ollamaUrl}
+                            onChange={(e) => setAiSettingsState({ ...aiSettings, ollamaUrl: e.target.value })}
+                            className="w-full px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Modello (Model Name)</label>
+                          <input
+                            type="text"
+                            value={aiSettings.ollamaModel}
+                            onChange={(e) => setAiSettingsState({ ...aiSettings, ollamaModel: e.target.value })}
+                            className="w-full px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Temperatura ({aiSettings.temperature})</label>
+                          <input
+                            type="range" min="0" max="1" step="0.1"
+                            value={aiSettings.temperature}
+                            onChange={(e) => setAiSettingsState({ ...aiSettings, temperature: parseFloat(e.target.value) })}
+                            className="w-full h-2 bg-neutral-200 dark:bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-primary-600"
+                          />
+                          <div className="flex justify-between text-[10px] text-neutral-400 mt-1">
+                            <span>Rigoroso (0)</span>
+                            <span>Creativo (1)</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Max Tokens ({aiSettings.numPredict})</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="4096"
+                            value={aiSettings.numPredict}
+                            onChange={(e) => setAiSettingsState({ ...aiSettings, numPredict: parseInt(e.target.value) || 0 })}
+                            className="w-full px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest">Istruzioni di Sistema (Custom Prompt Override)</label>
+                          <button
+                            onClick={() => setAiSettingsState({ ...aiSettings, systemPrompt: '' })}
+                            className="text-[10px] font-bold text-primary-600 hover:text-primary-700 underline"
+                          >
+                            Ripristina Default
+                          </button>
+                        </div>
+                        <textarea
+                          value={aiSettings.systemPrompt || ''}
+                          onChange={(e) => setAiSettingsState({ ...aiSettings, systemPrompt: e.target.value })}
+                          placeholder="Il testo inserito qui sovrascriverà il prompt di default..."
+                          className="w-full h-48 px-4 py-2 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 resize-none font-mono text-xs"
+                        />
+
+                        {!aiSettings.systemPrompt && (
+                          <div className="mt-4 p-4 bg-neutral-50 dark:bg-neutral-900/50 rounded-xl border border-neutral-100 dark:border-neutral-700">
+                            <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                              <Brain className="w-3 h-3" />
+                              Prompt In Uso (Default):
+                            </p>
+                            <pre className="text-[10px] text-neutral-500 whitespace-pre-wrap font-sans leading-relaxed italic">
+                              {DEFAULT_SYSTEM_PROMPT}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* --- TAB: INTEGRATIONS (SYNC) --- */}
+              {activeSettingsTab === 'integrations' && (
+                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                    <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-4">
+                        <div className="w-14 h-14 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl flex items-center justify-center border border-emerald-100 dark:border-emerald-800 shadow-sm">
+                          <Cloud className="w-7 h-7 text-emerald-600" />
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-black text-neutral-900 dark:text-white">Sincronizzazione Google Calendar</h3>
+                          <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Configura le chiavi API per mantenere sincronizzati i tuoi lavori.</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {googleSettings?.refreshToken && (
+                          <button
+                            onClick={handleManualSync}
+                            disabled={isSyncing}
+                            className={`px-4 py-3 font-bold rounded-xl transition-all duration-300 flex items-center gap-2 text-sm border-2
+                            ${isSyncing ? 'bg-neutral-50 text-neutral-400 border-neutral-100' : 'bg-white text-neutral-600 border-neutral-100 hover:border-emerald-500 hover:text-emerald-600'}`}
+                          >
+                            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                            Forza Sincronizzazione
+                          </button>
+                        )}
+                        <button
+                          onClick={async () => {
+                            if (googleSettings) {
+                              setIsProcessing(true);
+                              await setGoogleSettings(googleSettings);
                               setIsProcessing(false);
+                              setIsGoogleSaved(true);
+                              setTimeout(() => setIsGoogleSaved(false), 3000);
                             }
                           }}
-                          disabled={isProcessing}
-                          className="w-full px-4 py-3 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-2"
+                          className={`px-6 py-3 font-black rounded-xl transition-all duration-300 flex items-center gap-2 text-sm shadow-lg
+                        ${isGoogleSaved
+                              ? 'bg-emerald-600 text-white shadow-emerald-500/20'
+                              : 'bg-primary-600 text-white hover:bg-primary-700 shadow-primary-500/20 active:scale-95'}`}
                         >
-                          {isProcessing && updateStatus === 'available' ? (
+                          {isGoogleSaved ? (
                             <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              Installazione...
+                              <CheckCircle className="w-4 h-4" />
+                              Salvato!
                             </>
                           ) : (
                             <>
-                              <Download className="w-4 h-4" />
-                              Scarica e Installa Aggiornamento
+                              <Save className="w-4 h-4" />
+                              Salva Impostazioni
                             </>
                           )}
                         </button>
                       </div>
-                    )}
+                    </div>
 
-                    {updateStatus === 'downloaded' && (
-                      <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-green-100 dark:bg-green-900/50 rounded-full flex items-center justify-center shrink-0">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between p-6 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-3xl">
+                        <div className="flex items-center gap-4">
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all shadow-sm ${googleSettings?.enabled && googleSettings?.refreshToken ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600' : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400'}`}>
+                            <RefreshCw className={`w-6 h-6 ${googleSettings?.enabled && googleSettings?.refreshToken ? 'animate-spin-slow' : ''}`} />
                           </div>
-                          <div className="flex-1">
-                            <h4 className="text-sm font-bold text-green-800 dark:text-green-400">Aggiornamento Pronto</h4>
-                            <p className="text-xs text-green-700 dark:text-green-500">L'aggiornamento è stato scaricato e verrà installato al prossimo riavvio dell'app.</p>
+                          <div>
+                            <h4 className="text-sm font-black text-neutral-900 dark:text-white">Sincronizzazione Automatica</h4>
+                            <p className={`text-xs font-bold ${googleSettings?.refreshToken ? 'text-emerald-600' : 'text-neutral-500'}`}>
+                              {googleSettings?.refreshToken ? 'App autorizzata e pronta.' : 'Richiede autorizzazione.'}
+                            </p>
                           </div>
                         </div>
+                        <button
+                          onClick={() => {
+                            if (googleSettings) {
+                              setGoogleSettingsState({ ...googleSettings, enabled: !googleSettings.enabled });
+                            }
+                          }}
+                          className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all focus:outline-none shadow-inner
+                        ${googleSettings?.enabled ? 'bg-emerald-600' : 'bg-neutral-300 dark:bg-neutral-700'}`}
+                        >
+                          <span
+                            className={`inline-block h-5 w-5 transform rounded-full bg-white transition-all shadow-md
+                          ${googleSettings?.enabled ? 'translate-x-6' : 'translate-x-1'}`}
+                          />
+                        </button>
                       </div>
-                    )}
 
-                    {updateStatus === 'error' && (
-                      <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-red-100 dark:bg-red-900/50 rounded-full flex items-center justify-center shrink-0">
-                            <span className="text-red-600 text-xs">!</span>
-                          </div>
-                          <div className="flex-1">
-                            <h4 className="text-sm font-bold text-red-800 dark:text-red-400">Errore Aggiornamento</h4>
-                            <p className="text-xs text-red-700 dark:text-red-500">Impossibile verificare o installare gli aggiornamenti. Riprova più tardi.</p>
-                          </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest ml-1">Google Client ID</label>
+                          <input
+                            type="password"
+                            value={googleSettings?.clientId || ''}
+                            onChange={(e) => setGoogleSettingsState(googleSettings ? { ...googleSettings, clientId: e.target.value } : null)}
+                            placeholder="Inserisci il tuo Client ID"
+                            className="w-full px-5 py-3.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl outline-none focus:border-primary-500 dark:focus:border-primary-500 text-neutral-800 dark:text-white font-mono text-xs shadow-inner transition-all"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest ml-1">Google Client Secret</label>
+                          <input
+                            type="password"
+                            value={googleSettings?.clientSecret || ''}
+                            onChange={(e) => setGoogleSettingsState(googleSettings ? { ...googleSettings, clientSecret: e.target.value } : null)}
+                            placeholder="Inserisci il tuo Client Secret"
+                            className="w-full px-5 py-3.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl outline-none focus:border-primary-500 dark:focus:border-primary-500 text-neutral-800 dark:text-white font-mono text-xs shadow-inner transition-all"
+                          />
                         </div>
                       </div>
-                    )}
+
+                      {/* Step de Autenticazione */}
+                      {!googleSettings?.refreshToken ? (
+                        <div className="p-8 bg-primary-50/30 dark:bg-primary-900/10 rounded-3xl border border-primary-100 dark:border-primary-800/50">
+                          <div className="flex flex-col md:flex-row items-center gap-8">
+                            <div className="flex-1 space-y-4">
+                              <h4 className="text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
+                                <LucideIcons.Lock className="w-5 h-5 text-primary-600" />
+                                Autorizzazione Necessaria
+                              </h4>
+                              <p className="text-sm text-neutral-500 dark:text-neutral-400 leading-relaxed font-medium">
+                                Per collegare il tuo account, dopo aver salvato il Client ID e Secret:
+                                <br />
+                                1. Clicca su <strong>"Autorizza App"</strong>
+                                <br />
+                                2. Accetta le autorizzazioni nel browser
+                                <br />
+                                3. Copia il codice fornito e incollalo qui sotto
+                              </p>
+                              <button
+                                onClick={handleGoogleAuth}
+                                disabled={!googleSettings?.clientId || !googleSettings?.clientSecret}
+                                className="px-6 py-3 bg-white dark:bg-neutral-800 border-2 border-primary-200 text-primary-600 font-black rounded-xl hover:bg-primary-50 transition-all disabled:opacity-30 flex items-center gap-2 shadow-sm"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                                Autorizza App
+                              </button>
+                            </div>
+                            <div className="w-full md:w-1/2 space-y-3">
+                              <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Incolla qui il codice di autorizzazione</label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={googleAuthCode}
+                                  onChange={(e) => setGoogleAuthCode(e.target.value)}
+                                  placeholder="Codice Google..."
+                                  className="flex-1 px-5 py-3.5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl outline-none focus:border-emerald-500 text-xs font-mono"
+                                />
+                                <button
+                                  onClick={handleVerifyGoogleCode}
+                                  disabled={!googleAuthCode || isProcessing}
+                                  className="px-5 bg-emerald-600 text-white font-black rounded-2xl hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                                >
+                                  Verifica
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-6 bg-emerald-50/50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800/50 rounded-3xl flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/40 rounded-2xl flex items-center justify-center text-emerald-600">
+                              <CheckCircle className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-black text-neutral-900 dark:text-white">Account Collegato Correttamente</h4>
+                              <p className="text-xs font-bold text-emerald-600/80">Ultima sincronizzazione: {googleSettings.lastSync ? new Date(googleSettings.lastSync).toLocaleString('it-IT') : 'Nessuna'}</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              const confirmed = await ask("Vuoi davvero scollegare l'account Google? I dati locali rimarranno intatti ma la sincronizzazione si fermerà.", { title: 'Scollega Account', kind: 'warning' });
+                              if (confirmed) {
+                                const reset = { ...googleSettings, refreshToken: '', accessToken: '', expiryDate: 0, enabled: false };
+                                setGoogleSettingsState(reset);
+                                await setGoogleSettings(reset);
+                              }
+                            }}
+                            className="text-xs font-black text-red-500 hover:text-red-600 transition-colors bg-white dark:bg-neutral-800 px-4 py-2 rounded-xl border border-red-100 dark:border-red-900/30"
+                          >
+                            Scollega Account
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex items-start gap-3 p-4 bg-yellow-50/50 dark:bg-yellow-900/10 border border-yellow-100 dark:border-yellow-800/30 rounded-2xl">
+                        <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 shrink-0" />
+                        <p className="text-[10px] font-bold text-yellow-800/80 dark:text-yellow-500/80 leading-relaxed">
+                          Nota: Assicurati che l'app sia in modalità "Produzione" nella Console Google per evitare che i token scadano dopo 7 giorni.
+                          In alternativa, aggiungi il tuo indirizzo email come "Test User".
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeSettingsTab === 'system' && (
+                <>
+                  <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                        <RefreshCw className="w-6 h-6 text-primary-600" />
+                        Aggiornamenti Applicazione
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={async () => {
+                            setUpdateStatus('checking');
+                            const result = await checkForUpdates();
+                            if (result.available) {
+                              setUpdateStatus('available');
+                              setLatestVersion(result.latestVersion || '');
+                              setUpdateBody(result.body || null);
+                              setUpdateDate(result.date || null);
+                            } else {
+                              setUpdateStatus('up-to-date');
+                            }
+                          }}
+                          disabled={updateStatus === 'checking' || isProcessing}
+                          className="px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 text-sm disabled:opacity-50"
+                        >
+                          {updateStatus === 'checking' ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Verifica...
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="w-4 h-4" />
+                              Controlla Aggiornamenti
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Verifica la disponibilità di nuove versioni dell'applicazione e installa gli aggiornamenti automaticamente.</p>
+
+                    <div className="space-y-6">
+                      {/* Current Version Display */}
+                      <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                            <Package className="w-5 h-5 text-primary-600" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Versione Corrente</h4>
+                            <p className="text-xs text-neutral-500">{currentVersion || 'Caricamento...'}</p>
+                          </div>
+                        </div>
+                        {latestVersion && (
+                          <div className="text-right">
+                            <p className="text-xs font-bold text-primary-600">Nuova: {latestVersion}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Update Status & Actions */}
+                      {updateStatus === 'available' && (
+                        <div className="p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-xl">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className="w-8 h-8 bg-primary-100 dark:bg-primary-900/50 rounded-full flex items-center justify-center shrink-0">
+                              <Download className="w-4 h-4 text-primary-600" />
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="text-sm font-bold text-primary-800 dark:text-primary-400 mb-1">Aggiornamento Disponibile!</h4>
+                              {updateBody && (
+                                <p className="text-xs text-primary-700 dark:text-primary-500 mb-2">{updateBody}</p>
+                              )}
+                              {updateDate && (
+                                <p className="text-[10px] text-primary-600/70 dark:text-primary-500/70">
+                                  Pubblicato: {new Date(updateDate).toLocaleDateString('it-IT')}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              setIsProcessing(true);
+                              try {
+                                await installUpdate();
+                                setUpdateStatus('downloaded');
+                              } catch (e) {
+                                console.error('Install error:', e);
+                                setUpdateStatus('error');
+                              } finally {
+                                setIsProcessing(false);
+                              }
+                            }}
+                            disabled={isProcessing}
+                            className="w-full px-4 py-3 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition-colors flex items-center justify-center gap-2"
+                          >
+                            {isProcessing && updateStatus === 'available' ? (
+                              <>
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                Installazione...
+                              </>
+                            ) : (
+                              <>
+                                <Download className="w-4 h-4" />
+                                Scarica e Installa Aggiornamento
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      {updateStatus === 'downloaded' && (
+                        <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-green-100 dark:bg-green-900/50 rounded-full flex items-center justify-center shrink-0">
+                              <CheckCircle className="w-4 h-4 text-green-600" />
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="text-sm font-bold text-green-800 dark:text-green-400">Aggiornamento Pronto</h4>
+                              <p className="text-xs text-green-700 dark:text-green-500">L'aggiornamento è stato scaricato e verrà installato al prossimo riavvio dell'app.</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {updateStatus === 'error' && (
+                        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-red-100 dark:bg-red-900/50 rounded-full flex items-center justify-center shrink-0">
+                              <span className="text-red-600 text-xs">!</span>
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="text-sm font-bold text-red-800 dark:text-red-400">Errore Aggiornamento</h4>
+                              <p className="text-xs text-red-700 dark:text-red-500">Impossibile verificare o installare gli aggiornamenti. Riprova più tardi.</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {updateStatus === 'up-to-date' && (
-                      <div className="p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center shrink-0">
-                            <CheckCircle className="w-4 h-4 text-neutral-600 dark:text-neutral-400" />
-                          </div>
-                          <div className="flex-1">
-                            <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Applicazione Aggiornata</h4>
-                            <p className="text-xs text-neutral-500 dark:text-neutral-400">Non sono disponibili nuovi aggiornamenti. L'ultima versione installata è la più recente.</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  {/* Settings Toggles */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
-                            <RefreshCw className={`w-5 h-5 ${updateSettings.enabled ? 'text-primary-600' : 'text-neutral-400'}`} />
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Controllo Automatico</h4>
-                            <p className="text-xs text-neutral-500">Verifica aggiornamenti all'avvio</p>
+                        <div className="p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center shrink-0">
+                              <CheckCircle className="w-4 h-4 text-neutral-600 dark:text-neutral-400" />
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Applicazione Aggiornata</h4>
+                              <p className="text-xs text-neutral-500 dark:text-neutral-400">Non sono disponibili nuovi aggiornamenti. L'ultima versione installata è la più recente.</p>
+                            </div>
                           </div>
                         </div>
-                        <button
-                          onClick={async () => {
-                            const newValue = !updateSettings.enabled;
-                            await setUpdateSettingsState({ ...updateSettings, enabled: newValue });
-                            await setUpdateSettings({ ...updateSettings, enabled: newValue });
-                          }}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500
+                      )}
+                      {/* Settings Toggles */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                              <RefreshCw className={`w-5 h-5 ${updateSettings.enabled ? 'text-primary-600' : 'text-neutral-400'}`} />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Controllo Automatico</h4>
+                              <p className="text-xs text-neutral-500">Verifica aggiornamenti all'avvio</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              const newValue = !updateSettings.enabled;
+                              await setUpdateSettingsState({ ...updateSettings, enabled: newValue });
+                              await setUpdateSettings({ ...updateSettings, enabled: newValue });
+                            }}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500
                         ${updateSettings.enabled ? 'bg-primary-600' : 'bg-neutral-300 dark:bg-neutral-600'}`}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
                           ${updateSettings.enabled ? 'translate-x-6' : 'translate-x-1'}`}
-                          />
-                        </button>
-                      </div>
-
-                      <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
-                            <Download className={`w-5 h-5 ${updateSettings.autoInstall ? 'text-primary-600' : 'text-neutral-400'}`} />
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Installazione Automatica</h4>
-                            <p className="text-xs text-neutral-500">Installa automaticamente</p>
-                          </div>
+                            />
+                          </button>
                         </div>
-                        <button
-                          onClick={async () => {
-                            const newValue = !updateSettings.autoInstall;
-                            await setUpdateSettingsState({ ...updateSettings, autoInstall: newValue });
-                            await setUpdateSettings({ ...updateSettings, autoInstall: newValue });
-                          }}
-                          disabled={!updateSettings.enabled}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500 disabled:opacity-50
+
+                        <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-100 dark:border-neutral-700 flex items-center justify-center shadow-sm">
+                              <Download className={`w-5 h-5 ${updateSettings.autoInstall ? 'text-primary-600' : 'text-neutral-400'}`} />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Installazione Automatica</h4>
+                              <p className="text-xs text-neutral-500">Installa automaticamente</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              const newValue = !updateSettings.autoInstall;
+                              await setUpdateSettingsState({ ...updateSettings, autoInstall: newValue });
+                              await setUpdateSettings({ ...updateSettings, autoInstall: newValue });
+                            }}
+                            disabled={!updateSettings.enabled}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ring-2 ring-transparent focus:ring-primary-500 disabled:opacity-50
                         ${updateSettings.autoInstall ? 'bg-primary-600' : 'bg-neutral-300 dark:bg-neutral-600'}`}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
                           ${updateSettings.autoInstall ? 'translate-x-6' : 'translate-x-1'}`}
-                          />
-                        </button>
+                            />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Backup & Restore Settings (Task 13 & 14) */}
-                <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
-                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
-                    <Save className="w-6 h-6 text-primary-600" />
-                    Backup & Ripristino
-                  </h3>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Salva o ripristina tutte le impostazioni dell'applicazione (tecnici, percorsi, configurazioni IA e template).</p>
+                  {/* Backup & Restore Settings (Task 13 & 14) */}
+                  <div className="mt-8 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
+                      <Save className="w-6 h-6 text-primary-600" />
+                      Backup & Ripristino
+                    </h3>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Salva o ripristina tutte le impostazioni dell'applicazione (tecnici, percorsi, configurazioni IA e template).</p>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                    <button
-                      onClick={handleExportSettings}
-                      disabled={isProcessing}
-                      className="flex items-center justify-center gap-3 p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-xl text-primary-700 dark:text-primary-400 hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors font-bold disabled:opacity-50"
-                    >
-                      <Download className="w-5 h-5" />
-                      Esporta Tutto (JSON)
-                    </button>
-                    <button
-                      onClick={handleImportSettings}
-                      disabled={isProcessing}
-                      className="flex items-center justify-center gap-3 p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors font-bold shadow-sm disabled:opacity-50"
-                    >
-                      <Upload className="w-5 h-5" />
-                      Importa Backup
-                    </button>
-                  </div>
-
-                  <div className="pt-6 border-t border-neutral-100 dark:border-neutral-700">
-                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                      <div>
-                        <h4 className="text-sm font-bold text-red-600 flex items-center gap-2">
-                          <RotateCcw className="w-4 h-4" />
-                          Reset alle impostazioni di fabbrica
-                        </h4>
-                        <p className="text-xs text-neutral-500">Elimina tutti i settaggi e i template caricati.</p>
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                       <button
-                        onClick={handleResetSettings}
+                        onClick={handleExportSettings}
                         disabled={isProcessing}
-                        className="px-6 py-2 text-sm font-bold bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 rounded-lg transition-all disabled:opacity-50"
+                        className="flex items-center justify-center gap-3 p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-xl text-primary-700 dark:text-primary-400 hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors font-bold disabled:opacity-50"
                       >
-                        Esegui Reset
+                        <Download className="w-5 h-5" />
+                        Esporta Tutto (JSON)
+                      </button>
+                      <button
+                        onClick={handleImportSettings}
+                        disabled={isProcessing}
+                        className="flex items-center justify-center gap-3 p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors font-bold shadow-sm disabled:opacity-50"
+                      >
+                        <Upload className="w-5 h-5" />
+                        Importa Backup
                       </button>
                     </div>
+
+                    <div className="pt-6 border-t border-neutral-100 dark:border-neutral-700">
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div>
+                          <h4 className="text-sm font-bold text-red-600 flex items-center gap-2">
+                            <RotateCcw className="w-4 h-4" />
+                            Reset alle impostazioni di fabbrica
+                          </h4>
+                          <p className="text-xs text-neutral-500">Elimina tutti i settaggi e i template caricati.</p>
+                        </div>
+                        <button
+                          onClick={handleResetSettings}
+                          disabled={isProcessing}
+                          className="px-6 py-2 text-sm font-bold bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 rounded-lg transition-all disabled:opacity-50"
+                        >
+                          Esegui Reset
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                {isProcessing && <div className="mt-4 text-center text-primary-600 font-semibold animate-pulse">Salvataggio in corso...</div>}
+                  {isProcessing && <div className="mt-4 text-center text-primary-600 font-semibold animate-pulse">Salvataggio in corso...</div>}
 
-              </>
-            )}
+                </>
+              )}
 
 
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
         {/* --- VIEW: FORM COMPILATION --- */}
         {currentView === 'form' && (
@@ -2692,45 +2686,45 @@ function App() {
           </div>
         )}
 
-         {/* --- VIEW: AI EXTRACTION --- */}
-         {currentView === 'ai-extraction' && (
-           <AIExtraction onBack={handleGoHome} theme={theme} />
-         )}
+        {/* --- VIEW: AI EXTRACTION --- */}
+        {currentView === 'ai-extraction' && (
+          <AIExtraction onBack={handleGoHome} theme={theme} />
+        )}
 
-          {/* --- VIEW: STERLINK MANAGER --- */}
-          {currentView === 'sterlink-manager' && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <SterlinkManagerPage 
-                onFileSelected={(name: string, path: string | null) => {
-                  setSterlinkFileName(name);
-                  setSterlinkFilePath(path);
-                }} 
-              />
-            </div>
-          )}
+        {/* --- VIEW: STERLINK MANAGER --- */}
+        {currentView === 'sterlink-manager' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <SterlinkManagerPage
+              onFileSelected={(name: string, path: string | null) => {
+                setSterlinkFileName(name);
+                setSterlinkFilePath(path);
+              }}
+            />
+          </div>
+        )}
 
-          {/* --- VIEW: PANDETTA MANAGER --- */}
-          {currentView === 'pandetta-manager' && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full">
-              <PandettaManager 
-                onFileSelected={(name: string, path: string | null) => {
-                  setPandettaFileName(name);
-                  setPandettaFilePath(path);
-                }}
-                onResetPersistent={async () => {
-                  await clearExcelFile('pandetta');
-                  setPandettaFileName(null);
-                  setPandettaFilePath(null);
-                }}
-              />
-            </div>
-          )}
+        {/* --- VIEW: PANDETTA MANAGER --- */}
+        {currentView === 'pandetta-manager' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full">
+            <PandettaManager
+              onFileSelected={(name: string, path: string | null) => {
+                setPandettaFileName(name);
+                setPandettaFilePath(path);
+              }}
+              onResetPersistent={async () => {
+                await clearExcelFile('pandetta');
+                setPandettaFileName(null);
+                setPandettaFilePath(null);
+              }}
+            />
+          </div>
+        )}
 
-          {/* --- VIEW: CALENDAR --- */}
-          {currentView === 'calendar' && (
-            <CalendarPage />
-          )}
-       </main>
+        {/* --- VIEW: CALENDAR --- */}
+        {currentView === 'calendar' && (
+          <CalendarPage />
+        )}
+      </main>
 
     </div>
   );

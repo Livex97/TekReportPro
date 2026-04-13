@@ -1,5 +1,5 @@
 import { getCalendarEvents, getGoogleSettings, setCalendarEvents, setGoogleSettings, type GoogleCalendarSettings, type CalendarEvent, getGoogleEventMap, setGoogleEventMap } from './storage';
-import { pushEventToGoogle, refreshAccessToken, fetchGoogleCalendarEvents, type GoogleTokens } from './googleCalendar';
+import { refreshAccessToken, fetchGoogleCalendarEvents, type GoogleTokens } from './googleCalendar';
 
 /**
  * SyncManager coordinates the background synchronization process.

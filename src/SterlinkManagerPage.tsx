@@ -127,7 +127,6 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
   const [isDragging, setIsDragging] = useState(false);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' | 'loading' } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isLoadingFile, setIsLoadingFile] = useState(false);
    const [dynamicCols, setDynamicCols] = useState<string[]>([]);
    const [originalFileHash, setOriginalFileHash] = useState<string | null>(null);
    const [showExternalUpdateBanner, setShowExternalUpdateBanner] = useState(false);

@@ -90,7 +90,6 @@ const loadData = async () => {
       if (!formActivity.trim()) return;
 
       let eventToSync: CalendarEvent;
-      let isNew = false;
       let updatedEvents: CalendarEvent[];
 
       if (editingEvent) {
@@ -104,7 +103,6 @@ const loadData = async () => {
         };
         updatedEvents = events.map(e => e.id === editingEvent.id ? eventToSync : e);
       } else {
-        isNew = true;
         eventToSync = {
           id: crypto.randomUUID(),
           date: selectedDay!,

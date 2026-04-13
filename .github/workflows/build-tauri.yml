@@ -90,10 +90,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: 'RapportiniApp ${{ github.ref_name }}'
+          releaseName: 'TekReportPro ${{ github.ref_name }}'
           includeUpdaterJson: true
           releaseBody: |
-            ## RapportiniApp ${{ github.ref_name }}
+            ## TekReportPro ${{ github.ref_name }}
 
             Scarica l'installer per il tuo sistema operativo:
             - **Windows**: `.msi` o `.exe`
