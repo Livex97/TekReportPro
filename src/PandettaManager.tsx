@@ -5,6 +5,7 @@ import { readFile } from '@tauri-apps/plugin-fs';
 import { save, open, ask } from '@tauri-apps/plugin-dialog';
 import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, clearExcelFile, getExcelFileHash, setExcelFileHash, getCachedExcelFilePath, getHasUnsavedChanges, setHasUnsavedChanges as saveHasUnsavedChanges } from './utils/storage';
 import { invoke } from '@tauri-apps/api/core';
+import { type ExtractedData } from './utils/ollama';
 
 // Tipi
 interface PandettaRow {
@@ -18,6 +19,7 @@ interface PandettaRow {
 interface PandettaManagerProps {
   onFileSelected?: (name: string, path: string | null) => void;
   onResetPersistent?: () => Promise<void> | void;
+  onExternalAddRow?: ExtractedData | null;
   className?: string;
 }
 
@@ -67,7 +69,7 @@ interface TecnicoColor {
   export: string;
 }
 
-export default function PandettaManager({ onFileSelected, onResetPersistent, className = '' }: PandettaManagerProps) {
+export default function PandettaManager({ onFileSelected, onResetPersistent, onExternalAddRow, className = '' }: PandettaManagerProps) {
   const [view, setView] = useState<ViewState>('upload');
   const [rows, setRows] = useState<PandettaRow[]>([]);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -139,7 +141,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
         if (jsonData && jsonData.length > 0) {
           setRows(jsonData);
           setOriginalRows(jsonData);
-          
+
           const unsaved = await getHasUnsavedChanges('pandetta');
           setHasUnsavedChanges(unsaved);
           buildTecnicoColorMap(jsonData);
@@ -157,9 +159,9 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
           const file = await getExcelFile('pandetta');
           if (file) {
             const cachedPath = await getCachedExcelFilePath('pandetta');
-            const response = await invoke<any>('read_excel_command', { 
-                path: cachedPath,
-                typeHint: 'pandetta' 
+            const response = await invoke<any>('read_excel_command', {
+              path: cachedPath,
+              typeHint: 'pandetta'
             });
             await processLoadedData(response.rows, response.columns);
           }
@@ -248,6 +250,61 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     }
   };
 
+  const [lastProcessedExternalRow, setLastProcessedExternalRow] = useState<string>('');
+
+  // Handle external row add from AIExtraction
+  useEffect(() => {
+    if (!onExternalAddRow || view !== 'table') return;
+    
+    // Create a unique key for this row to avoid duplicates
+    const rowKey = `${onExternalAddRow.data}-${onExternalAddRow.cliente}-${onExternalAddRow.strumentoDaRiparare}`;
+    
+    // Skip if we've already processed this exact row
+    if (rowKey === lastProcessedExternalRow) return;
+    
+    setLastProcessedExternalRow(rowKey);
+    const data = onExternalAddRow;
+    
+    const rifCol = dynamicCols.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA'))
+      || dynamicCols.find(c => c.toUpperCase().includes('RIF'))
+      || 'N.RIF PANDETTA';
+
+    const statoColName = dynamicCols.find(c => c.toUpperCase().includes('STATO') && c.toUpperCase().includes('INTERVENTO')) || 'STATO INTERVENTO';
+
+    const nextRif = Math.max(0, ...rows.filter(r => !r._empty).map(r => {
+      const val = r[rifCol];
+      return val != null ? parseInt(String(val)) || 0 : 0;
+    })) + 1;
+
+    const newRow: PandettaRow = {
+      [rifCol]: nextRif,
+      'DATA': data.data || '',
+      'CLIENTE': data.cliente || '',
+      'UBICAZIONE': data.ubicazione || '',
+      'STRUMENTO DA RIPARARE': data.strumentoDaRiparare || '',
+      "TIPO DI ATTIVITA'/GUASTO": data.tipoDiAttivitaGuasto || '',
+      'TECNICO': data.tecnico || '',
+      [statoColName]: 'APERTO',
+      _status: 'aperta',
+      _empty: false,
+      _new: true
+    };
+
+    dynamicCols.forEach(col => {
+      if (!(col in newRow)) newRow[col] = null;
+    });
+
+    setRows(prev => {
+      const updated = [...prev, newRow];
+      buildTecnicoColorMap(updated);
+      saveExcelDataJson('pandetta', updated);
+      return updated;
+    });
+    setHasUnsavedChanges(true);
+    saveHasUnsavedChanges('pandetta', true);
+    toast('Nuovo intervento aggiunto dalla AI!', 'success');
+  }, [onExternalAddRow, view, dynamicCols, rows, lastProcessedExternalRow]);
+
   const reloadFromExternal = async () => {
     if (!originalPath) return;
     try {
@@ -318,8 +375,8 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
   // ── FILE HANDLING ──
   const handleFile = async (file: File, path?: string | null) => {
-  setIsLoadingFile(true);
-  toast('Caricamento file...', 'loading');
+    setIsLoadingFile(true);
+    toast('Caricamento file...', 'loading');
     setFileName(file.name);
     if (path) setOriginalPath(path);
     if (onFileSelected) onFileSelected(file.name, path || null);
@@ -337,9 +394,9 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     }
 
     try {
-      const response = await invoke<any>('read_excel_command', { 
+      const response = await invoke<any>('read_excel_command', {
         path: path || file.name,
-        typeHint: 'pandetta' 
+        typeHint: 'pandetta'
       });
 
       await processLoadedData(response.rows, response.columns);
@@ -361,10 +418,10 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       || 'N.RIF PANDETTA';
 
     const orderedCols = [
-      rifCol, 
+      rifCol,
       ...fileColumns.filter(c => c !== rifCol && !c.startsWith('_'))
     ];
-    
+
     setDynamicCols(orderedCols);
 
     const processedRows = rows.map((item: any) => {
@@ -748,7 +805,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       {/* Sticky Header Wrapper */}
       <div className="sticky top-16 z-20 flex flex-col gap-4 pt-4 pb-6 bg-transparent -mx-4 px-4 -mt-8 transition-all">
         {/* Top Bar */}
-        <div className="flex items-center gap-4 p-4 bg-white/80 dark:bg-neutral-800/80 rounded-2xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-md">
+        <div className="flex items-center gap-4 px-3 py-2 bg-white/80 dark:bg-neutral-800/80 rounded-2xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-md">
           <div className="flex items-center gap-2">
             <FileSpreadsheet className="w-6 h-6 text-blue-600" />
             <span className="px-2 py-1 text-xs font-mono bg-neutral-100 dark:bg-neutral-700/50 rounded text-neutral-600 dark:text-neutral-300">
@@ -791,7 +848,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
         </div>
 
         {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-3 p-4 bg-white/80 dark:bg-neutral-800/80 rounded-2xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-md">
+        <div className="flex flex-wrap items-center gap-3 px-3 py-2 bg-white/80 dark:bg-neutral-800/80 rounded-2xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-md">
           <div className="relative flex-1 min-w-[200px] max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
             <input
@@ -851,8 +908,8 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
               setHasUnsavedChanges(false);
               await saveHasUnsavedChanges('pandetta', false);
 
-  try {
-    // processing...
+              try {
+                // processing...
                 await clearExcelFile('pandetta');
                 if (onResetPersistent) await onResetPersistent();
                 toast('Cache rimossa. Carica un nuovo file.', 'info');
@@ -900,93 +957,93 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
       {/* Table Section with fade on scroll */}
       <div className="flex-1 relative overflow-hidden flex flex-col min-h-0">
-        <div 
+        <div
           className="flex-1 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 overflow-auto scrollbar-thin scrollbar-thumb-neutral-300 dark:scrollbar-thumb-neutral-600 pb-12"
           style={{
             maskImage: 'linear-gradient(to bottom, black, black calc(100% - 4rem), transparent)',
             WebkitMaskImage: 'linear-gradient(to bottom, black, black calc(100% - 4rem), transparent)',
           }}
         >
-        <table className="w-full text-sm text-left">
-          <thead className="sticky top-0 bg-neutral-100 dark:bg-neutral-700 z-10 shadow-sm">
-            <tr>
-              {tableCols.map(col => (
-                <th
-                  key={col}
-                  onClick={() => {
-                    if (sortCol === col) {
-                      setSortDir(prev => (prev === 1 ? -1 : 1));
-                    } else {
-                      setSortCol(col);
-                      setSortDir(1);
-                    }
-                  }}
-                  className="px-4 py-3 font-semibold text-neutral-700 dark:text-neutral-200 border-b border-neutral-200 dark:border-neutral-600 cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-600 select-none whitespace-nowrap align-middle"
-                >
-                  <div className="flex items-center gap-1">
-                    {getColLabel(col)}
-                    {sortCol === col && (
-                      <span className="text-blue-500">{sortDir === 1 ? '▲' : '▼'}</span>
-                    )}
-                  </div>
-                </th>
-              ))}
-              <th className="px-4 py-3 font-semibold text-neutral-700 dark:text-neutral-200 border-b border-neutral-200 dark:border-neutral-600 w-24 align-middle">
-                Azioni
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.length === 0 ? (
+          <table className="w-full text-sm text-left">
+            <thead className="sticky top-0 bg-neutral-100 dark:bg-neutral-700 z-10 shadow-sm">
               <tr>
-                <td colSpan={tableCols.length + 1} className="px-4 py-12 text-center text-neutral-500">
-                  Nessun dato disponibile
-                </td>
-              </tr>
-            ) : (
-              visibleRows.map((row) => {
-                const realIdx = rows.findIndex(r => r === row);
-                const status = row._status;
-                const rowStyle = status === 'chiusa' ? 'bg-emerald-50/90 dark:bg-emerald-900/40 hover:bg-emerald-100/100 dark:hover:bg-emerald-900/80' :
-                  status === 'negativa' ? 'bg-red-50/90 dark:bg-red-900/40 hover:bg-red-100/100 dark:hover:bg-red-900/80' :
-                    'bg-yellow-50/100 dark:bg-yellow-900/60 hover:bg-yellow-100/100 dark:hover:bg-yellow-900/100';
-                return (
-                  <tr
-                    key={realIdx}
-                    className={`group transition-colors duration-200 cursor-pointer ${rowStyle}`}
-                    onClick={() => openEdit(realIdx)}
+                {tableCols.map(col => (
+                  <th
+                    key={col}
+                    onClick={() => {
+                      if (sortCol === col) {
+                        setSortDir(prev => (prev === 1 ? -1 : 1));
+                      } else {
+                        setSortCol(col);
+                        setSortDir(1);
+                      }
+                    }}
+                    className="px-4 py-3 font-semibold text-neutral-700 dark:text-neutral-200 border-b border-neutral-200 dark:border-neutral-600 cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-600 select-none whitespace-nowrap align-middle"
                   >
-                    {tableCols.map(col => (
-                      <td key={col} className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-600 align-middle whitespace-nowrap">
-                        {String(row[col] || '').trim()}
+                    <div className="flex items-center gap-1">
+                      {getColLabel(col)}
+                      {sortCol === col && (
+                        <span className="text-blue-500">{sortDir === 1 ? '▲' : '▼'}</span>
+                      )}
+                    </div>
+                  </th>
+                ))}
+                <th className="px-4 py-3 font-semibold text-neutral-700 dark:text-neutral-200 border-b border-neutral-200 dark:border-neutral-600 w-24 align-middle">
+                  Azioni
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.length === 0 ? (
+                <tr>
+                  <td colSpan={tableCols.length + 1} className="px-4 py-12 text-center text-neutral-500">
+                    Nessun dato disponibile
+                  </td>
+                </tr>
+              ) : (
+                visibleRows.map((row) => {
+                  const realIdx = rows.findIndex(r => r === row);
+                  const status = row._status;
+                  const rowStyle = status === 'chiusa' ? 'bg-emerald-50/90 dark:bg-emerald-900/40 hover:bg-emerald-100/100 dark:hover:bg-emerald-900/80' :
+                    status === 'negativa' ? 'bg-red-50/90 dark:bg-red-900/40 hover:bg-red-100/100 dark:hover:bg-red-900/80' :
+                      'bg-yellow-50/100 dark:bg-yellow-900/60 hover:bg-yellow-100/100 dark:hover:bg-yellow-900/100';
+                  return (
+                    <tr
+                      key={realIdx}
+                      className={`group transition-colors duration-200 cursor-pointer ${rowStyle}`}
+                      onClick={() => openEdit(realIdx)}
+                    >
+                      {tableCols.map(col => (
+                        <td key={col} className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-600 align-middle whitespace-nowrap">
+                          {String(row[col] || '').trim()}
+                        </td>
+                      ))}
+                      <td className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-600 text-right align-middle">
+                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openEdit(realIdx); }}
+                            className="p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-xl transition-all shadow-sm border border-blue-100 dark:border-blue-800"
+                            title="Modifica"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteRow(realIdx); }}
+                            className="p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-xl transition-all shadow-sm border border-red-100 dark:border-red-800"
+                            title="Elimina"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
-                    ))}
-                    <td className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-600 text-right align-middle">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openEdit(realIdx); }}
-                          className="p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-xl transition-all shadow-sm border border-blue-100 dark:border-blue-800"
-                          title="Modifica"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); deleteRow(realIdx); }}
-                          className="p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-xl transition-all shadow-sm border border-red-100 dark:border-red-800"
-                          title="Elimina"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
 
       {/* Modal - Simplified for brevity but will be built dynamically */}
       {modalOpen && (
@@ -1027,7 +1084,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
                     <p className="text-sm font-bold text-red-800 dark:text-red-200">{validationError}</p>
                     <p className="text-xs text-red-600 dark:text-red-400 opacity-80">Inserisci un valore nel campo evidenziato per procedere.</p>
                   </div>
-                  <button 
+                  <button
                     onClick={() => setValidationError(null)}
                     className="p-1 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-full transition-colors"
                   >
@@ -1091,9 +1148,8 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
                             setModalStatus(newStatus);
                           }}
                           required
-                          className={`w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none ${
-                            validationError && !value ? 'border-red-500 ring-4 ring-red-500/10 bg-red-50/30' : 'border-neutral-200 dark:border-neutral-700'
-                          }`}
+                          className={`w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none ${validationError && !value ? 'border-red-500 ring-4 ring-red-500/10 bg-red-50/30' : 'border-neutral-200 dark:border-neutral-700'
+                            }`}
                           placeholder="Es. APERTO, CHIUSO..."
                         />
                         <datalist id="stato-intervento-datalist">

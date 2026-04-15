@@ -10,7 +10,7 @@ import { extractFieldsFromDocx, extractTextFromDocx } from './utils/docxParser';
 import type { FormField } from './utils/docxParser';
 import { autoFillFields, extractTextFromPdf } from './utils/pdfParser';
 import { generateDocx } from './utils/documentGenerator';
-import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getCsvPath, setCsvPath, getSavePath, setSavePath, getNextDocNumber, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS, getUpdateSettings, setUpdateSettings, checkForUpdates, installUpdate, getCurrentVersion, type UpdateSettings, DEFAULT_UPDATE_SETTINGS, getSectionDefinitions, setSectionDefinitions, type SectionDefinition, DEFAULT_SECTIONS, exportAllSettings, importAllSettings, resetAllSettings, getExcelFileName, getExcelFilePath, clearExcelFile, getGoogleSettings, setGoogleSettings, type GoogleCalendarSettings } from './utils/storage';
+import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, setCustomLayout, type CustomLayout, getSavePath, setSavePath, getNextDocNumber, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS, getUpdateSettings, setUpdateSettings, checkForUpdates, installUpdate, getCurrentVersion, type UpdateSettings, DEFAULT_UPDATE_SETTINGS, getSectionDefinitions, setSectionDefinitions, type SectionDefinition, DEFAULT_SECTIONS, exportAllSettings, importAllSettings, resetAllSettings, getExcelFileName, getExcelFilePath, clearExcelFile, getGoogleSettings, setGoogleSettings, type GoogleCalendarSettings } from './utils/storage';
 import { sendAppNotification } from './utils/notifications';
 import { DEFAULT_SYSTEM_PROMPT } from './utils/ollama';
 import AIExtraction from './AIExtraction';
@@ -76,7 +76,6 @@ function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [technicians, setTechniciansList] = useState<string[]>([]);
   const [newTechName, setNewTechName] = useState('');
-  const [csvPath, setCsvPathState] = useState('');
   const [savePath, setSavePathState] = useState('');
   const [customLayout, setCustomLayoutState] = useState<CustomLayout>({});
   const [aiSettings, setAiSettingsState] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
@@ -129,6 +128,8 @@ function App() {
   const [pandettaFilePath, setPandettaFilePath] = useState<string | null>(null);
   const [sterlinkFileName, setSterlinkFileName] = useState<string | null>(null);
   const [sterlinkFilePath, setSterlinkFilePath] = useState<string | null>(null);
+  const [pendingPandettaRow, setPendingPandettaRow] = useState<any>(null);
+  const [pandettaRowVersion, setPandettaRowVersion] = useState<number>(0);
   const actionLock = useRef(false);
 
 
@@ -147,9 +148,6 @@ function App() {
 
     const techs = await getTechnicians();
     setTechniciansList(techs);
-
-    const savedCsvPath = await getCsvPath();
-    setCsvPathState(savedCsvPath);
 
     const savedSavePath = await getSavePath();
     setSavePathState(savedSavePath);
@@ -850,6 +848,11 @@ function App() {
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const handleAddToPandetta = (data: any) => {
+    setPendingPandettaRow(data);
+    setPandettaRowVersion(v => v + 1);
   };
 
   const handleGenerate = () => {
@@ -1567,50 +1570,6 @@ className={getNavClasses('settings')}
                     </div>
 
                     <div className="space-y-6">
-                      <div>
-                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2 flex items-center gap-2">
-                          <Save className="w-3 h-3" />
-                          Database CSV Destinazione (Output)
-                        </label>
-                        <div className="flex gap-3 items-center">
-                          <div className="relative flex-1">
-                            <input
-                              type="text"
-                              readOnly
-                              value={csvPath || 'Nessun file selezionato...'}
-                              className="w-full px-4 py-2 pr-8 border border-neutral-200 dark:border-neutral-700 rounded-lg outline-none bg-neutral-50 dark:bg-neutral-900 dark:text-neutral-300 truncate"
-                            />
-                            {csvPath && csvPath.trim() !== '' && (
-                              <button
-                                onClick={async () => {
-                                  setCsvPathState('');
-                                  await setCsvPath('');
-                                }}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-600 dark:text-neutral-500 rounded transition-colors"
-                                title="Rimuovi percorso"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                          <button
-                            onClick={async () => {
-                              const selected = await open({
-                                multiple: false,
-                                filters: [{ name: 'CSV Document', extensions: ['csv'] }]
-                              });
-                              if (selected && typeof selected === 'string') {
-                                setCsvPathState(selected);
-                                await setCsvPath(selected);
-                              }
-                            }}
-                            className="px-4 py-2 bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 text-white font-bold rounded-lg hover:bg-neutral-800 dark:hover:bg-white transition-colors shrink-0"
-                          >
-                            Seleziona CSV
-                          </button>
-                        </div>
-                      </div>
-
                       <div className="p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
@@ -2688,7 +2647,12 @@ className={getNavClasses('settings')}
 
         {/* --- VIEW: AI EXTRACTION --- */}
         {currentView === 'ai-extraction' && (
-          <AIExtraction onBack={handleGoHome} theme={theme} />
+          <AIExtraction 
+            onBack={handleGoHome} 
+            onAddToPandetta={handleAddToPandetta}
+            hasPandettaFile={!!pandettaFilePath}
+            theme={theme} 
+          />
         )}
 
         {/* --- VIEW: STERLINK MANAGER --- */}
@@ -2716,6 +2680,7 @@ className={getNavClasses('settings')}
                 setPandettaFileName(null);
                 setPandettaFilePath(null);
               }}
+              onExternalAddRow={pandettaRowVersion > 0 ? pendingPandettaRow : null}
             />
           </div>
         )}

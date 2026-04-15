@@ -5,23 +5,21 @@ import { readFile } from '@tauri-apps/plugin-fs';
 import { listen } from '@tauri-apps/api/event';
 import { extractTextFromPdf } from './utils/pdfParser';
 import { generateOllamaExtraction, type ExtractedData } from './utils/ollama';
-import { checkDuplicateInCsv, appendRowToCsv } from './utils/csvHandler';
-import { getCsvPath } from './utils/storage';
 import { sendAppNotification } from './utils/notifications';
 import PostalMime from 'postal-mime';
 
 interface AIExtractionProps {
     onBack: () => void;
+    onAddToPandetta?: (data: ExtractedData) => void;
+    hasPandettaFile?: boolean;
     theme?: 'light' | 'dark';
 }
 
-export function AIExtraction({ onBack }: AIExtractionProps) {
-    const [csvPath, setCsvPath] = useState<string>('');
+export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExtractionProps) {
     const [sourceText, setSourceText] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [extracted, setExtracted] = useState<ExtractedData | null>(null);
     const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error' | 'warning', msg: string } | null>(null);
-    const [isSaving, setIsSaving] = useState(false);
     const [abortController, setAbortController] = useState<AbortController | null>(null);
     const [executionTime, setExecutionTime] = useState<number | null>(null);
     const [timerValue, setTimerValue] = useState<number>(0);
@@ -80,22 +78,10 @@ export function AIExtraction({ onBack }: AIExtractionProps) {
         };
     }, []);
 
-    useEffect(() => {
-        loadCsvPath();
-        return () => {
-            if (abortController) abortController.abort();
-        };
-    }, []);
-
-    const loadCsvPath = async () => {
-        const path = await getCsvPath();
-        setCsvPath(path);
-    };
-
     const processFileContent = async (fileName: string, content: Uint8Array) => {
         setIsProcessing(false);
         setSaveStatus(null);
-        
+
         let text = '';
         if (fileName.toLowerCase().endsWith('.pdf')) {
             const pdfResult = await extractTextFromPdf(content);
@@ -103,20 +89,20 @@ export function AIExtraction({ onBack }: AIExtractionProps) {
         } else if (fileName.toLowerCase().endsWith('.eml')) {
             const parser = new PostalMime();
             const email = await parser.parse(content as any);
-            
+
             const metaFrom = email.from?.address || email.from?.name || '';
             const metaSubject = email.subject || '';
             const metaDate = email.date || '';
-            
+
             let bodyText = email.text || '';
             if (!bodyText && email.html) {
                 bodyText = email.html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-                                   .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-                                   .replace(/<[^>]*>?/gm, ' ')
-                                   .replace(/\s+/g, ' ')
-                                   .trim();
+                    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                    .replace(/<[^>]*>?/gm, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
             }
-            
+
             text = `METADATI:
 Da: ${metaFrom}
 Oggetto: ${metaSubject}
@@ -166,7 +152,7 @@ ${bodyText}`;
         setSaveStatus(null);
         setExecutionTime(null);
         const startTime = Date.now();
-        
+
         try {
             const result = await generateOllamaExtraction(text, controller.signal);
             const endTime = Date.now();
@@ -201,45 +187,29 @@ ${bodyText}`;
         }
     };
 
-    const handleSaveToCsv = async () => {
-        if (!csvPath) {
-            setSaveStatus({ type: 'error', msg: 'Devi prima impostare il percorso del file Pandetta CSV nelle impostazioni!' });
-            return;
-        }
+    const handleSaveToPandetta = async () => {
         if (!extracted || !extracted.data || !extracted.cliente) {
             setSaveStatus({ type: 'error', msg: 'Attenzione: Data e Cliente sono campi obbligatori.' });
             return;
         }
 
-        setIsSaving(true);
-        setSaveStatus(null);
-        try {
-            const isDuplicate = await checkDuplicateInCsv(csvPath, extracted);
-            if (isDuplicate) {
-                setSaveStatus({ type: 'warning', msg: 'Esiste già un intervento per questo cliente, strumento e data!' });
-                setIsSaving(false);
-                return;
-            }
-
-            await appendRowToCsv(csvPath, extracted);
-            setSaveStatus({ type: 'success', msg: 'Richiesta di intervento salvata correttamente nel CSV.' });
+        if (onAddToPandetta) {
+            onAddToPandetta(extracted);
+            setSaveStatus({ type: 'success', msg: 'Intervento aggiunto alla Pandetta con stato APERTO.' });
             setExtracted(null);
             setSourceText('');
-        } catch (error: any) {
-            console.error(error);
-            setSaveStatus({ type: 'error', msg: 'Errore durante il salvataggio nel file CSV.' });
-        } finally {
-            setIsSaving(false);
+        } else {
+            setSaveStatus({ type: 'error', msg: 'Pandetta non disponibile. Carica prima un file Excel.' });
         }
     };
 
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
             {isDragging && (
-                <div 
+                <div
                     className="fixed inset-0 z-[9999] flex items-center justify-center p-12 bg-black/40 backdrop-blur-sm pointer-events-none"
                 >
-                    <div 
+                    <div
                         className="w-full h-full border-4 border-dashed border-primary-500 rounded-3xl flex flex-col items-center justify-center bg-white dark:bg-neutral-900 shadow-2xl animate-in zoom-in-95 duration-200"
                     >
                         <Upload className="w-20 h-20 text-primary-500 mb-4 animate-bounce" />
@@ -269,7 +239,7 @@ ${bodyText}`;
                 <div className="space-y-6">
                     <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6">
                         <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-4">Sorgente Dati</h3>
-                        
+
                         <button
                             onClick={handleFileUpload}
                             disabled={isProcessing}
@@ -294,13 +264,13 @@ ${bodyText}`;
                             placeholder="Incolla qui il testo dell'email di assistenza..."
                             className="mt-6 w-full h-48 p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 resize-none dark:text-white"
                         />
-                        
+
                         <button
                             onClick={handleExtractClick}
                             disabled={!sourceText.trim()}
                             className={`w-full mt-4 flex justify-center items-center gap-2 px-5 py-3 font-bold rounded-xl transition-colors 
-                                ${isProcessing 
-                                    ? 'bg-red-500 hover:bg-red-600 text-white' 
+                                ${isProcessing
+                                    ? 'bg-red-500 hover:bg-red-600 text-white'
                                     : 'bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 text-white'}
                                 disabled:opacity-50`}
                         >
@@ -329,16 +299,16 @@ ${bodyText}`;
                             <FileText className="w-5 h-5 text-emerald-500" />
                             Dati Estratti {executionTime !== null && <span className="text-[10px] font-normal text-neutral-400 ml-1">({executionTime.toFixed(2)}s)</span>}
                         </h3>
-                        {!csvPath && (
-                            <span className="text-xs font-bold bg-amber-100 text-amber-800 px-3 py-1 rounded-full">CSV non configurato</span>
+                        {!hasPandettaFile && (
+                            <span className="text-xs font-bold bg-amber-100 text-amber-800 px-3 py-1 rounded-full">Carica Pandetta</span>
                         )}
                     </div>
 
                     {saveStatus && (
                         <div className={`p-4 rounded-xl mb-6 text-sm font-semibold flex items-center gap-2
-                            ${saveStatus.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30' : 
-                              saveStatus.type === 'warning' ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-900/30' : 
-                              'bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/30'}
+                            ${saveStatus.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30' :
+                                saveStatus.type === 'warning' ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-900/30' :
+                                    'bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/30'}
                         `}>
                             {saveStatus.type === 'success' ? <CheckCircle className="w-5 h-5" /> : null}
                             {saveStatus.msg}
@@ -363,9 +333,9 @@ ${bodyText}`;
                             ].map(({ key, label }) => (
                                 <div key={key} className="bg-neutral-50 dark:bg-neutral-700/30 p-3 rounded-lg border border-neutral-100 dark:border-neutral-700">
                                     <label className="block text-xs font-bold text-neutral-500 tracking-wide uppercase mb-1">{label}</label>
-                                    <input 
-                                        type="text" 
-                                        value={extracted[key as keyof ExtractedData]} 
+                                    <input
+                                        type="text"
+                                        value={extracted[key as keyof ExtractedData]}
                                         onChange={(e) => handleFieldChange(key as keyof ExtractedData, e.target.value)}
                                         className="w-full bg-transparent border-none outline-none focus:ring-0 p-0 text-neutral-900 dark:text-white text-sm font-semibold"
                                     />
@@ -376,12 +346,12 @@ ${bodyText}`;
 
                     <div className="mt-6 pt-6 border-t border-neutral-100 dark:border-neutral-700">
                         <button
-                            onClick={handleSaveToCsv}
-                            disabled={!extracted || isSaving || !csvPath}
+                            onClick={handleSaveToPandetta}
+                            disabled={!extracted || !hasPandettaFile}
                             className="w-full flex justify-center items-center gap-2 px-5 py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl transition-colors disabled:opacity-50 disabled:hover:bg-primary-600"
                         >
-                            {isSaving ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Database className="w-6 h-6" />}
-                            Salva in Pandetta CSV
+                            <Database className="w-6 h-6" />
+                            Salva in Pandetta
                         </button>
                     </div>
                 </div>
