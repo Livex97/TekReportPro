@@ -3,7 +3,9 @@ import { ArrowLeft, Upload, FileText, Database, CheckCircle, Brain, RefreshCw } 
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { extractTextFromPdf } from './utils/pdfParser';
+import { extractTextFromDocx } from './utils/docxParser';
 import { generateOllamaExtraction, type ExtractedData } from './utils/ollama';
 import { sendAppNotification } from './utils/notifications';
 import PostalMime from 'postal-mime';
@@ -61,7 +63,7 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                         const filePath = paths[0];
                         const fileName = filePath.split(/[/\\]/).pop() || '';
                         const content = await readFile(filePath);
-                        await processFileContent(fileName, content);
+                        await processFileContent(fileName, content, filePath);
                     } catch (error) {
                         console.error("Errore durante il caricamento del file:", error);
                     }
@@ -78,14 +80,35 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
         };
     }, []);
 
-    const processFileContent = async (fileName: string, content: Uint8Array) => {
+    const processFileContent = async (fileName: string, content: Uint8Array, filePath?: string) => {
         setIsProcessing(false);
         setSaveStatus(null);
 
         let text = '';
-        if (fileName.toLowerCase().endsWith('.pdf')) {
+        const lowerName = fileName.toLowerCase();
+
+        if (lowerName.endsWith('.pdf')) {
             const pdfResult = await extractTextFromPdf(content);
             text = pdfResult.fullText;
+        } else if (lowerName.endsWith('.docx')) {
+            const file = new File([content as any], fileName, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+            text = await extractTextFromDocx(file);
+        } else if (lowerName.endsWith('.doc')) {
+            if (filePath) {
+                try {
+                    const docxContent = await invoke<number[]>('convert_doc_to_docx', { inputPath: filePath });
+                    const docxUint8 = new Uint8Array(docxContent);
+                    const file = new File([docxUint8 as any], fileName + 'x', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+                    text = await extractTextFromDocx(file);
+                } catch (err) {
+                    console.error('Extraction error (.doc):', err);
+                    setSaveStatus({ type: 'error', msg: 'Errore durante la conversione del file .doc.' });
+                    return;
+                }
+            } else {
+                setSaveStatus({ type: 'error', msg: 'Percorso file mancante per conversione .doc.' });
+                return;
+            }
         } else if (fileName.toLowerCase().endsWith('.eml')) {
             const parser = new PostalMime();
             const email = await parser.parse(content as any);
@@ -123,13 +146,13 @@ ${bodyText}`;
         try {
             const selected = await open({
                 multiple: false,
-                filters: [{ name: 'Documenti', extensions: ['pdf', 'txt', 'eml'] }]
+                filters: [{ name: 'Documenti', extensions: ['pdf', 'txt', 'eml', 'docx', 'doc'] }]
             });
 
             if (selected && typeof selected === 'string') {
                 const fileName = selected.split(/[/\\]/).pop() || '';
                 const content = await readFile(selected);
-                await processFileContent(fileName, content);
+                await processFileContent(fileName, content, selected);
             }
         } catch (error) {
             console.error(error);
@@ -214,7 +237,7 @@ ${bodyText}`;
                     >
                         <Upload className="w-20 h-20 text-primary-500 mb-4 animate-bounce" />
                         <h3 className="text-3xl font-black text-neutral-900 dark:text-white mb-2 text-center px-4">Rilascia il file per l'estrazione</h3>
-                        <p className="text-xl text-neutral-600 dark:text-neutral-400 text-center px-4">PDF, TXT o EML verranno elaborati automaticamente</p>
+                        <p className="text-xl text-neutral-600 dark:text-neutral-400 text-center px-4">PDF, Word (.doc, .docx) o Email verranno elaborati automaticamente</p>
                     </div>
                 </div>
             )}
@@ -246,7 +269,7 @@ ${bodyText}`;
                             className="w-full mb-6 border-2 border-dashed border-primary-200 hover:border-primary-500 bg-primary-50/50 dark:border-primary-900 dark:bg-primary-900/10 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-xl p-8 flex flex-col items-center justify-center transition-all disabled:opacity-50"
                         >
                             <Upload className="w-10 h-10 text-primary-500 mb-2" />
-                            <span className="font-bold text-primary-700 dark:text-primary-400">Carica PDF o Email (.txt, .eml)</span>
+                            <span className="font-bold text-primary-700 dark:text-primary-400">Carica PDF, Word (.doc/x) o Email (.eml)</span>
                         </button>
 
                         <div className="relative">

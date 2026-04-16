@@ -241,3 +241,54 @@ pub async fn read_excel_command(
 
     Ok(data)
 }
+
+#[tauri::command]
+pub async fn convert_doc_to_docx(input_path: String) -> Result<Vec<u8>, String> {
+    let temp_dir = tempfile::tempdir().map_err(|e| format!("Errore directory temporanea: {}", e))?;
+    let temp_path = temp_dir.path();
+    
+    // 1. Proviamo con textutil se siamo su macOS (integrato nel sistema)
+    if cfg!(target_os = "macos") {
+        let output_file = temp_path.join("output.docx");
+        let output = Command::new("textutil")
+            .arg("-convert").arg("docx")
+            .arg("-output").arg(&output_file)
+            .arg(&input_path)
+            .output();
+
+        if let Ok(out) = output {
+            if out.status.success() {
+                if let Ok(content) = std::fs::read(&output_file) {
+                    return Ok(content);
+                }
+            }
+        }
+    }
+
+    // 2. Fallback su LibreOffice (soffice) - Disponibile su Windows e Linux
+    let soffice_cmd = if cfg!(target_os = "windows") { "soffice.exe" } else { "soffice" };
+    
+    // Cerchiamo soffice nel PATH del sistema
+    if let Ok(soffice_path) = which::which(soffice_cmd) {
+        let output = Command::new(soffice_path)
+            .arg("--headless")
+            .arg("--convert-to").arg("docx")
+            .arg("--outdir").arg(temp_path)
+            .arg(&input_path)
+            .output()
+            .map_err(|e| format!("Errore durante l'esecuzione di LibreOffice: {}", e))?;
+
+        if output.status.success() {
+            // LibreOffice salva il file con lo stesso nome ma estensione .docx nella outdir
+            let file_name = std::path::Path::new(&input_path)
+                .file_stem()
+                .ok_or("Nome file non valido")?
+                .to_string_lossy();
+            let converted_path = temp_path.join(format!("{}.docx", file_name));
+            
+            return std::fs::read(&converted_path).map_err(|e| format!("Errore lettura file convertito: {}", e));
+        }
+    }
+
+    Err("Impossibile convertire il file .doc. Su macOS assicurati che textutil funzioni, su Windows/Linux è necessario LibreOffice installato e aggiunto al PATH.".to_string())
+}

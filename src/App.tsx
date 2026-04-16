@@ -5,6 +5,7 @@ import { open, save, ask, message } from '@tauri-apps/plugin-dialog';
 import { readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { requestPermission, isPermissionGranted } from '@tauri-apps/plugin-notification';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 
 import { extractFieldsFromDocx, extractTextFromDocx } from './utils/docxParser';
 import type { FormField } from './utils/docxParser';
@@ -240,7 +241,7 @@ function App() {
             const filePath = paths[0];
             const fileName = filePath.split(/[/\\]/).pop() || 'source';
             const content = await readFile(filePath);
-            await processSourceFile(fileName, content);
+            await processSourceFile(fileName, content, filePath);
           } catch (err) {
             console.error('[App] Drag drop error:', err);
           }
@@ -298,14 +299,25 @@ function App() {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'Word Document', extensions: ['docx'] }]
+        filters: [{ name: 'Word Document', extensions: ['docx', 'doc'] }]
       });
 
       if (selected && typeof selected === 'string') {
+        const isLegacyDoc = selected.toLowerCase().endsWith('.doc');
         const fileName = selected.split(/[/\\]/).pop() || 'template.docx';
+        const finalName = isLegacyDoc ? fileName + 'x' : fileName;
+        
         setIsProcessing(true);
-        const content = await readFile(selected);
-        const file = new File([content], fileName, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+        
+        let content: Uint8Array;
+        if (isLegacyDoc) {
+          const docxContent = await invoke<number[]>('convert_doc_to_docx', { inputPath: selected });
+          content = new Uint8Array(docxContent);
+        } else {
+          content = await readFile(selected);
+        }
+
+        const file = new File([content], finalName, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 
         await saveTemplateFile(slotId, file);
         await loadInitialData();
@@ -458,15 +470,16 @@ function App() {
     }
   };
 
-  const processSourceFile = async (fileName: string, content: Uint8Array) => {
+  const processSourceFile = async (fileName: string, content: Uint8Array, filePath?: string) => {
     setIsProcessing(true);
     try {
       console.log('[App] Processing source file:', fileName);
       const isPdf = fileName.toLowerCase().endsWith('.pdf');
       const isDocx = fileName.toLowerCase().endsWith('.docx');
+      const isDoc = fileName.toLowerCase().endsWith('.doc');
 
-      if (!isPdf && !isDocx) {
-        alert("Formato non supportato. Trascina un file PDF o DOCX.");
+      if (!isPdf && !isDocx && !isDoc) {
+        alert("Formato non supportato. Trascina un file PDF, DOCX o DOC.");
         return;
       }
 
@@ -478,6 +491,24 @@ function App() {
       } else if (isDocx) {
         const file = new File([content as any], fileName, { type: mimeType });
         extractedData = await extractTextFromDocx(file);
+      } else if (isDoc) {
+        try {
+          // If we have the path, we can use the Rust command to convert it
+          if (filePath) {
+            const docxContent = await invoke<number[]>('convert_doc_to_docx', { inputPath: filePath });
+            const docxUint8 = new Uint8Array(docxContent);
+            const file = new File([docxUint8 as any], fileName + 'x', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+            extractedData = await extractTextFromDocx(file);
+          } else {
+            console.error('[App] Missing filePath for .doc conversion');
+            alert("Il formato .doc richiede il percorso del file per la conversione.");
+            return;
+          }
+        } catch (err) {
+          console.error('[App] .doc conversion error:', err);
+          alert("Errore durante la conversione del file .doc. Assicurati che il formato sia corretto.");
+          return;
+        }
       }
 
       if (extractedData) {
@@ -720,14 +751,14 @@ function App() {
         multiple: false,
         filters: [{
           name: 'Sorgente Dati',
-          extensions: ['pdf', 'docx']
+          extensions: ['pdf', 'docx', 'doc']
         }]
       });
 
       if (selected && typeof selected === 'string') {
         const fileName = selected.split(/[/\\]/).pop() || 'source';
         const content = await readFile(selected);
-        await processSourceFile(fileName, content);
+        await processSourceFile(fileName, content, selected);
       }
     } catch (err) {
       console.error("[App] Error picking source file:", err);
