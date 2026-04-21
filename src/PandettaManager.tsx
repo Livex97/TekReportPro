@@ -87,6 +87,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' | 'loading' } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
   const [dynamicCols, setDynamicCols] = useState<string[]>([]);
   const [originalFileHash, setOriginalFileHash] = useState<string | null>(null);
   const [showExternalUpdateBanner, setShowExternalUpdateBanner] = useState(false);
@@ -393,7 +394,9 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
   // ── FILE HANDLING ──
   const handleFile = async (file: File, path?: string | null) => {
     setIsLoadingFile(true);
+    setLoadProgress(0);
     toast('Caricamento file...', 'loading');
+    setLoadProgress(10);
     setFileName(file.name);
     if (path) setOriginalPath(path);
     if (onFileSelected) onFileSelected(file.name, path || null);
@@ -411,23 +414,28 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
     }
 
     try {
+      setLoadProgress(40);
       const response = await invoke<any>('read_excel_command', {
         path: path || file.name,
         typeHint: 'pandetta'
       });
 
+      setLoadProgress(70);
       await processLoadedData(response.rows, response.columns);
       toast(`File caricato: ${file.name}`, 'success');
+      setLoadProgress(100);
       setIsLoadingFile(false);
     } catch (err: any) {
       console.error('Error reading excel via python:', err);
       toast(`Errore nel caricamento: ${err}`, 'error');
+      setLoadProgress(0);
       setIsLoadingFile(false);
     }
   };
 
   const processLoadedData = async (rows: any[], fileColumns: string[]) => {
     if (!rows || rows.length === 0) return;
+    setLoadProgress(80);
 
     // Ordina le colonne: N.RIF all'inizio, poi tutte le altre nell'ordine del file
     const rifCol = fileColumns.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA'))
@@ -719,9 +727,16 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
       <div className={`flex-1 flex flex-col items-center justify-center py-12 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500 ${className}`}>
         {isLoadingFile && (
           <div className="fixed inset-0 flex items-center justify-center bg-neutral-900/60 backdrop-blur-sm z-50">
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center w-64">
               <Loader2 className="w-12 h-12 animate-spin text-white mb-4" />
-              <span className="text-white text-lg">Caricamento file...</span>
+              <span className="text-white text-lg mb-2">Caricamento file...</span>
+              <div className="w-full bg-neutral-700 rounded-full h-3 overflow-hidden">
+                <div 
+                  className="bg-blue-500 h-full transition-all duration-300" 
+                  style={{ width: `${loadProgress}%` }}
+                />
+              </div>
+              <span className="text-neutral-300 text-sm mt-1">{loadProgress}%</span>
             </div>
           </div>
         )}

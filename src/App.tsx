@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileText, Settings, Home as HomeIcon, FileIcon, Sun, Moon, Brain, Database, FileSpreadsheet, Calendar } from 'lucide-react';
 import { open, save, ask, message } from '@tauri-apps/plugin-dialog';
+import { open as shellOpen } from '@tauri-apps/plugin-shell';
 import { readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
@@ -9,6 +10,7 @@ import { extractFieldsFromDocx } from './utils/docxParser';
 import type { FormField } from './utils/docxParser';
 
 import { saveTemplateFile, getTemplateFile, getAllTemplatesMeta, deleteTemplate, type TemplateIndex, getSetting, setSetting, getTechnicians, setTechnicians, getCustomLayout, type CustomLayout, getSavePath, setSavePath, getNextDocNumber, getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS, getUpdateSettings, setUpdateSettings, checkForUpdates, installUpdate, getCurrentVersion, type UpdateSettings, DEFAULT_UPDATE_SETTINGS, getSectionDefinitions, type SectionDefinition, DEFAULT_SECTIONS, exportAllSettings, importAllSettings, resetAllSettings, getExcelFileName, getExcelFilePath, clearExcelFile, getGoogleSettings, setGoogleSettings, type GoogleCalendarSettings } from './utils/storage';
+import { getGoogleAuthUrl, getTokensFromCode } from './utils/googleCalendar';
 import { sendAppNotification } from './utils/notifications';
 import AIExtraction from './AIExtraction';
 import SterlinkManagerPage from './SterlinkManagerPage';
@@ -425,10 +427,8 @@ function App() {
   const handleGoogleAuth = async () => {
     if (!googleSettings?.clientId) return;
     try {
-      const { getGoogleAuthUrl } = await import('./utils/googleCalendar');
-      const { open } = await import('@tauri-apps/plugin-shell');
       const url = getGoogleAuthUrl(googleSettings.clientId);
-      await open(url);
+await shellOpen(url);
     } catch (err) {
       console.error('[GoogleAuth] Failed to open auth URL:', err);
     }
@@ -441,7 +441,9 @@ function App() {
 
     setIsProcessing(true);
     try {
-      const { getTokensFromCode } = await import('./utils/googleCalendar');
+      
+      
+
       const tokens = await getTokensFromCode(googleAuthCode, googleSettings.clientId, googleSettings.clientSecret);
 
       const updatedSettings = {
@@ -700,7 +702,16 @@ className={getNavClasses('settings')}
             onManualSync={handleManualSync}
             onCheckForUpdates={handleCheckForUpdates}
             onInstallUpdate={handleInstallUpdate}
-            onClearExcelFile={clearExcelFile}
+            onClearExcelFile={async (type: 'pandetta' | 'sterlink') => {
+              await clearExcelFile(type);
+              if (type === 'pandetta') {
+                setPandettaFileName(null);
+                setPandettaFilePath(null);
+              } else {
+                setSterlinkFileName(null);
+                setSterlinkFilePath(null);
+              }
+            }}
             onSetSavePath={setSavePath}
             onSetAiSettings={setAiSettings}
             onSetGoogleSettings={setGoogleSettings}

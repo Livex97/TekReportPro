@@ -8,7 +8,7 @@ import type { FormField } from './utils/docxParser';
 import { extractTextFromDocx } from './utils/docxParser';
 import { autoFillFields, extractTextFromPdf } from './utils/pdfParser';
 import { generateDocx } from './utils/documentGenerator';
-import { setCustomLayout, type CustomLayout, type TemplateIndex, type SectionDefinition } from './utils/storage';
+import { setCustomLayout, type CustomLayout, type TemplateIndex, type SectionDefinition, getTemplateFile } from './utils/storage';
 
 interface TemplateManagerPageProps {
   templateMeta: (TemplateIndex | undefined)[];
@@ -447,7 +447,7 @@ export default function TemplateManagerPage({
 
       if (secondTemplateMeta) {
         try {
-          const { getTemplateFile } = await import('./utils/storage');
+          // getTemplateFile imported statically
           const secondTemplateFile = await getTemplateFile(secondTemplateMeta.id);
           if (secondTemplateFile) {
             const secondOutputName = baseName ? `${baseName}P_.docx` : 'formazione_personale.docx';
