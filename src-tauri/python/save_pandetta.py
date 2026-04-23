@@ -359,6 +359,42 @@ def main():
             if hasattr(pandetta_table, 'autoFilter') and pandetta_table.autoFilter:
                 pandetta_table.autoFilter.ref = pandetta_table.ref
 
+    # Riordina le righe dati per N.RIF (crescente) prima di salvare
+    # Questo risolve il problema delle nuove righe aggiunte in fondo al file
+    rows_with_data = []
+    for r_idx in range(2, ws.max_row + 1):
+        row_vals = [ws.cell(row=r_idx, column=c).value for c in range(1, ws.max_column + 1)]
+        if any(v is not None and str(v).strip() for v in row_vals):
+            id_val = ws.cell(row=r_idx, column=rif_col_idx).value
+            if isinstance(id_val, float) and id_val.is_integer():
+                id_val = int(id_val)
+            rows_with_data.append((id_val, r_idx, row_vals))
+    
+    # Ordina per RIF (crescente), mettendo le righe senza RIF in fondo
+    def sort_key(item):
+        id_val = item[0]
+        if id_val is None or str(id_val).strip() == '':
+            return (1, 0)  # Metti righe senza RIF in fondo
+        try:
+            return (0, int(id_val))
+        except (ValueError, TypeError):
+            return (0, 0)
+    
+    rows_with_data.sort(key=sort_key)
+    
+    # Compila i valori delle righe ordinate
+    header_vals = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+    
+    # Copia i dati riordinati
+    for target_r_idx, (_, source_r_idx, row_vals) in enumerate(rows_with_data, start=2):
+        for c_idx, val in enumerate(row_vals, start=1):
+            ws.cell(row=target_r_idx, column=c_idx).value = val
+    
+    # Pulisci righe vuote in fondo
+    for r_idx in range(len(rows_with_data) + 2, ws.max_row + 2):
+        for c_idx in range(1, ws.max_column + 1):
+            ws.cell(row=r_idx, column=c_idx).value = None
+
     wb.save(out_path)
 
 if __name__ == '__main__':

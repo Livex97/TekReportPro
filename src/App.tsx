@@ -737,6 +737,11 @@ className={getNavClasses('settings')}
                 setSterlinkFileName(name);
                 setSterlinkFilePath(path);
               }}
+              onResetPersistent={async () => {
+                await clearExcelFile('sterlink');
+                setSterlinkFileName(null);
+                setSterlinkFilePath(null);
+              }}
             />
           </div>
         )}

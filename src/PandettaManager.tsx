@@ -326,14 +326,17 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
   const reloadFromExternal = async () => {
     if (!originalPath) return;
     try {
+      setIsLoadingFile(true);
+      setLoadProgress(0);
+      toast('Caricamento file...', 'loading');
       const content = await readFile(originalPath);
       const file = new File([content], fileName);
       await handleFile(file, originalPath);
-      // handleFile already updates originalFileHash and hides banner
       toast('File ricaricato con le modifiche esterne', 'success');
     } catch (err) {
       console.error('Error reloading external file:', err);
       toast('Errore nel ricaricare il file', 'error');
+      setIsLoadingFile(false);
     }
   };
 
@@ -805,6 +808,21 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
           <div className="flex flex-col items-center">
             <Loader2 className="w-12 h-12 animate-spin text-white mb-4" />
             <span className="text-white text-lg">Salvataggio in corso...</span>
+          </div>
+        </div>
+      )}
+      {isLoadingFile && (
+        <div className="fixed inset-0 flex items-center justify-center bg-neutral-900/60 backdrop-blur-sm z-[60]">
+          <div className="flex flex-col items-center w-64">
+            <Loader2 className="w-12 h-12 animate-spin text-white mb-4" />
+            <span className="text-white text-lg mb-2">Caricamento file...</span>
+            <div className="w-full bg-neutral-700 rounded-full h-3 overflow-hidden">
+              <div 
+                className="bg-blue-500 h-full transition-all duration-300" 
+                style={{ width: `${loadProgress}%` }}
+              />
+            </div>
+            <span className="text-neutral-300 text-sm mt-1">{loadProgress}%</span>
           </div>
         </div>
       )}

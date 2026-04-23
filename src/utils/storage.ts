@@ -589,11 +589,13 @@ export async function clearExcelFile(type: 'pandetta' | 'sterlink') {
         const store = await getStore();
         await store.delete(`${type}_file_name`);
         await store.delete(`${type}_file_path`);
+        await store.delete(`${type}_file_hash`);
+        await store.delete(`${type}_dynamic_cols`);
+        await store.delete(`${type}_original_rows_count`);
+        await store.delete(`${type}_has_unsaved_changes`);
         await store.save();
 
-        // 2. Remove the actual Excel file
         await remove(`excel/${type}_data.xlsx`, { baseDir: BaseDirectory.AppData }).catch(() => {});
-        // 3. Remove the JSON data file
         await remove(`excel/${type}_data.json`, { baseDir: BaseDirectory.AppData }).catch(() => {});
     } catch (e) {
         console.error(`[Storage] Error clearing ${type} file:`, e);

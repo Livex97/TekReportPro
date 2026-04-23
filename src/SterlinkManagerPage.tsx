@@ -15,6 +15,7 @@ interface SterlinkRow {
 
 interface SterlinkManagerPageProps {
   onFileSelected?: (name: string, path: string | null) => void;
+  onResetPersistent?: () => Promise<void>;
   className?: string;
 }
 
@@ -113,7 +114,7 @@ function MultiEntryEditor({ value, onChange }: MultiEntryEditorProps) {
 }
 
 // --- Main Page ---
-export default function SterlinkManagerPage({ onFileSelected, className = '' }: SterlinkManagerPageProps) {
+export default function SterlinkManagerPage({ onFileSelected, onResetPersistent, className = '' }: SterlinkManagerPageProps) {
   const [view, setView] = useState<ViewState>('upload');
   const [rows, setRows] = useState<SterlinkRow[]>([]);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -281,6 +282,9 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
   const reloadFromExternal = async () => {
     if (!originalPath) return;
     try {
+      setIsLoadingFile(true);
+      setLoadProgress(0);
+      toast('Caricamento file...', 'loading');
       const content = await readFile(originalPath);
       const file = new File([content], fileName);
       await handleFile(file, originalPath);
@@ -288,6 +292,7 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
     } catch (err) {
       console.error('Error reloading external file:', err);
       toast('Errore nel ricaricare il file', 'error');
+      setIsLoadingFile(false);
     }
   };
 
@@ -635,6 +640,21 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
           </div>
         </div>
       )}
+      {isLoadingFile && (
+        <div className="fixed inset-0 flex items-center justify-center bg-neutral-900/60 backdrop-blur-sm z-[60]">
+          <div className="flex flex-col items-center w-64">
+            <Loader2 className="w-12 h-12 animate-spin text-white mb-4" />
+            <span className="text-white text-lg mb-2">Caricamento file...</span>
+            <div className="w-full bg-neutral-700 rounded-full h-3 overflow-hidden">
+              <div 
+                className="bg-blue-500 h-full transition-all duration-300" 
+                style={{ width: `${loadProgress}%` }}
+              />
+            </div>
+            <span className="text-neutral-300 text-sm mt-1">{loadProgress}%</span>
+          </div>
+        </div>
+      )}
       {showExternalUpdateBanner && (
         <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-yellow-100/90 backdrop-blur-md border border-yellow-400 text-yellow-800 p-4 rounded-2xl shadow-2xl z-50 max-w-md animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="flex items-center gap-2 mb-2">
@@ -691,9 +711,17 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
                 setSearchTerm('');
                 setView('upload');
                 setHasUnsavedChanges(false);
+                setOriginalFileHash(null);
+                setLastNotifiedExternalHash(null);
+                setShowExternalUpdateBanner(false);
+                if (onFileSelected) onFileSelected('Sterlink_Installate.xlsx', null);
                 await saveHasUnsavedChanges('sterlink', false);
 
-                await clearExcelFile('sterlink');
+                if (onResetPersistent) {
+                  await onResetPersistent();
+                } else {
+                  await clearExcelFile('sterlink');
+                }
                 toast('Cache rimossa. Carica un nuovo file.', 'info');
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-600 rounded-lg text-xs font-medium transition-all duration-200 border border-neutral-300 dark:border-neutral-600 cursor-pointer"
