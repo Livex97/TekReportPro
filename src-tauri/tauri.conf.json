@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "TekReportPro",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "identifier": "com.tekreportpro.assistant",
   "plugins": {
     "updater": {
@@ -60,7 +60,8 @@
     "externalBin": [
       "binaries/save_pandetta",
       "binaries/save_sterlink",
-      "binaries/read_excel"
+      "binaries/read_excel",
+      "binaries/check_email"
     ]
   }
 }

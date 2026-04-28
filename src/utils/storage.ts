@@ -347,6 +347,38 @@ export async function setGoogleSettings(settings: GoogleCalendarSettings): Promi
     await setSetting('google_calendar_settings', settings);
 }
 
+// ===========================
+// EMAIL INTEGRATION SETTINGS
+// ===========================
+
+export interface EmailSettings {
+    enabled: boolean;
+    host: string;
+    port: number;
+    username: string;
+    password?: string;
+    autoCheck: boolean;
+    maxEmails: number;
+}
+
+export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
+    enabled: false,
+    host: 'imap.aruba.it',
+    port: 993,
+    username: '',
+    password: '',
+    autoCheck: false,
+    maxEmails: 15
+};
+
+export async function getEmailSettings(): Promise<EmailSettings> {
+    return await getSetting<EmailSettings>('email_settings', DEFAULT_EMAIL_SETTINGS);
+}
+
+export async function setEmailSettings(settings: EmailSettings): Promise<void> {
+    await setSetting('email_settings', settings);
+}
+
 // Tipo per i dati dell'update ( corrispondente a tauri_plugin_updater::Update )
 export type UpdateInfo = {
     version: string;

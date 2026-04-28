@@ -384,13 +384,15 @@ function App() {
 
   const navigateView = async (targetView: View) => {
     if (currentView === 'form' && formFields.length > 0) {
-      const excludedKeywords = ['DATA', 'N_DOC', 'N.DOC', 'NUMERO DOCUMENTO', 'DATA INTERVENTO'];
+      const ignoredKeywords = ['DATA', 'N_DOC', 'N.DOC', 'NUMERO DOCUMENTO', 'DATA INTERVENTO'];
       const isDirty = formFields.some(f => {
-        const val = (f.value || '').trim();
-        if (!val) return false;
         const ucLabel = f.label.toUpperCase();
         const ucId = f.id.toUpperCase();
-        return !excludedKeywords.some(kw => ucLabel.includes(kw) || ucId.includes(kw));
+        const isIgnored = ignoredKeywords.some(kw => ucLabel === kw || ucId === kw);
+        if (isIgnored) return false;
+        const val = (f.value || '').trim();
+        if (f.type === 'checkbox') return val === '1';
+        return val.length > 0;
       });
       if (isDirty) {
         const confirmExit = await ask('Ci sono dati inseriti nel form. Vuoi uscire senza salvare?', { title: 'Dati non salvati', kind: 'warning' });

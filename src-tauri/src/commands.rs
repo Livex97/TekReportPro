@@ -292,3 +292,56 @@ pub async fn convert_doc_to_docx(input_path: String) -> Result<Vec<u8>, String> 
 
     Err("Impossibile convertire il file .doc. Su macOS assicurati che textutil funzioni, su Windows/Linux è necessario LibreOffice installato e aggiunto al PATH.".to_string())
 }
+
+#[tauri::command]
+pub async fn check_email_command(
+    settings: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let executable = if cfg!(debug_assertions) {
+        find_sidecar_dev("check_email")?
+    } else {
+        let exe_dir = std::env::current_exe()
+            .map_err(|e| format!("Impossibile trovare exe path: {}", e))?
+            .parent()
+            .ok_or_else(|| "Impossibile trovare directory exe".to_string())?
+            .to_path_buf();
+
+        let target = get_current_target();
+        let ext = get_exe_extension();
+
+        let with_triple = exe_dir.join(format!("check_email-{}{}", target, ext));
+        let without_triple = exe_dir.join(format!("check_email{}", ext));
+        
+        if with_triple.exists() {
+            with_triple
+        } else if without_triple.exists() {
+            without_triple
+        } else {
+            return Err(format!(
+                "check_email non trovato in {:?}. Cercato: check_email-{}{} e check_email{}",
+                exe_dir, target, ext, ext
+            ));
+        }
+    };
+
+    let settings_str = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
+
+    // Esegui lo script Python
+    let output = Command::new(&executable)
+        .arg(&settings_str)
+        .output()
+        .map_err(|e| format!("Failed to execute {:?}: {}", executable, e))?;
+
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Python error: {}", err_msg));
+    }
+
+    // Decodifica JSON restituito da stdout
+    let stdout_content = String::from_utf8_lossy(&output.stdout);
+    let data: serde_json::Value = serde_json::from_str(&stdout_content)
+        .map_err(|e| format!("Failed to parse JSON output: {}", e))?;
+
+    Ok(data)
+}
+

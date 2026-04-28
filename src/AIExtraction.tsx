@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Upload, FileText, Database, CheckCircle, Brain, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, Database, CheckCircle, Brain, RefreshCw, Settings, Mail, RefreshCcw, X, Paperclip } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { listen } from '@tauri-apps/api/event';
@@ -8,6 +8,7 @@ import { extractTextFromPdf } from './utils/pdfParser';
 import { extractTextFromDocx } from './utils/docxParser';
 import { generateOllamaExtraction, type ExtractedData } from './utils/ollama';
 import { sendAppNotification } from './utils/notifications';
+import { getEmailSettings, setEmailSettings, type EmailSettings, DEFAULT_EMAIL_SETTINGS } from './utils/storage';
 import PostalMime from 'postal-mime';
 
 interface AIExtractionProps {
@@ -15,6 +16,16 @@ interface AIExtractionProps {
     onAddToPandetta?: (data: ExtractedData) => void;
     hasPandettaFile?: boolean;
     theme?: 'light' | 'dark';
+}
+
+interface FetchedEmail {
+    id: string;
+    messageId: string;
+    subject: string;
+    from: string;
+    date: string;
+    body: string;
+    attachments: { filename: string, mimeType: string, data: string }[];
 }
 
 export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExtractionProps) {
@@ -26,6 +37,30 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
     const [executionTime, setExecutionTime] = useState<number | null>(null);
     const [timerValue, setTimerValue] = useState<number>(0);
     const [isDragging, setIsDragging] = useState(false);
+
+    // IMAP & Email State
+    const [inputMode, setInputMode] = useState<'imap' | 'manual'>('imap');
+    const [emailSettings, setEmailSettingsState] = useState<EmailSettings>(DEFAULT_EMAIL_SETTINGS);
+    const [showSettings, setShowSettings] = useState(false);
+    const [emails, setEmails] = useState<FetchedEmail[]>([]);
+    const [selectedEmail, setSelectedEmail] = useState<FetchedEmail | null>(null);
+    const [isFetchingEmails, setIsFetchingEmails] = useState(false);
+
+    useEffect(() => {
+        // Carica impostazioni email
+        getEmailSettings().then(setEmailSettingsState);
+    }, []);
+
+    // Polling automatico se abilitato
+    useEffect(() => {
+        let intervalId: any;
+        if (emailSettings.autoCheck && emailSettings.username && emailSettings.password) {
+            intervalId = setInterval(() => {
+                handleFetchEmails(true);
+            }, 5 * 60 * 1000); // 5 minuti
+        }
+        return () => clearInterval(intervalId);
+    }, [emailSettings.autoCheck, emailSettings.username, emailSettings.password]);
 
     useEffect(() => {
         let interval: any;
@@ -60,6 +95,7 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                 const paths = event.payload.paths;
                 if (paths && paths.length > 0) {
                     try {
+                        setInputMode('manual'); // Forza il tab manuale
                         const filePath = paths[0];
                         const fileName = filePath.split(/[/\\]/).pop() || '';
                         const content = await readFile(filePath);
@@ -79,6 +115,84 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
             if (unlistenLeave) unlistenLeave();
         };
     }, []);
+
+    const handleSaveSettings = async () => {
+        await setEmailSettings(emailSettings);
+        setShowSettings(false);
+        setSaveStatus({ type: 'success', msg: 'Impostazioni IMAP salvate.' });
+    };
+
+    const handleFetchEmails = async (silent = false) => {
+        if (!emailSettings.username || !emailSettings.password) {
+            if (!silent) {
+                setSaveStatus({ type: 'warning', msg: 'Configura le credenziali email nelle impostazioni (icona ingranaggio).' });
+                setShowSettings(true);
+            }
+            return;
+        }
+        setIsFetchingEmails(true);
+        if (!silent) setSaveStatus(null);
+        try {
+            const result: any = await invoke('check_email_command', { settings: emailSettings });
+            
+            if (result.success) {
+                const newEmails = result.emails as FetchedEmail[];
+                let newCount = 0;
+                setEmails(prev => {
+                    const existingIds = new Set(prev.map(e => e.messageId));
+                    newCount = newEmails.filter(e => !existingIds.has(e.messageId)).length;
+                    
+                    const combined = [...newEmails, ...prev];
+                    const unique = Array.from(new Map(combined.map(item => [item.messageId, item])).values());
+                    return unique;
+                });
+                if (newCount > 0) {
+                    sendAppNotification("Nuove Email", `Trovati ${newCount} nuovi messaggi in arrivo.`);
+                    if (!silent) setSaveStatus({ type: 'success', msg: `Sincronizzazione completata: ${newCount} nuovi messaggi.` });
+                } else {
+                    if (!silent) setSaveStatus({ type: 'success', msg: `Nessun nuovo messaggio trovato.` });
+                }
+            } else {
+                if (!silent) setSaveStatus({ type: 'error', msg: result.error || 'Errore durante la sincronizzazione IMAP.' });
+            }
+        } catch (error: any) {
+            if (!silent) setSaveStatus({ type: 'error', msg: `Errore durante la chiamata al sidecar: ${error}` });
+        } finally {
+            setIsFetchingEmails(false);
+        }
+    };
+
+    const handleSelectEmail = async (email: FetchedEmail) => {
+        setSelectedEmail(email);
+        setIsProcessing(false);
+        setSaveStatus(null);
+        
+        let combinedText = `METADATI:\nDa: ${email.from}\nOggetto: ${email.subject}\nData: ${email.date}\n\nCORPO:\n${email.body}\n`;
+        
+        // Process PDF attachments
+        if (email.attachments && email.attachments.length > 0) {
+            combinedText += `\n--- TESTO ESTRATTO DAGLI ALLEGATI PDF ---\n`;
+            for (const att of email.attachments) {
+                if (att.mimeType === 'application/pdf') {
+                    try {
+                        const binaryString = atob(att.data);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        const pdfResult = await extractTextFromPdf(bytes);
+                        combinedText += `\n[ALLEGATO: ${att.filename}]\n${pdfResult.fullText}\n`;
+                    } catch (e) {
+                        console.error("Error parsing attached PDF:", e);
+                        combinedText += `\n[ERRORE DURANTE L'ESTRAZIONE DELL'ALLEGATO: ${att.filename}]\n`;
+                    }
+                }
+            }
+        }
+        
+        setSourceText(combinedText);
+        setExtracted(null);
+    };
 
     const processFileContent = async (fileName: string, content: Uint8Array, filePath?: string) => {
         setIsProcessing(false);
@@ -126,13 +240,26 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                     .trim();
             }
 
-            text = `METADATI:
-Da: ${metaFrom}
-Oggetto: ${metaSubject}
-Data: ${metaDate}
+            let combinedText = `METADATI:\nDa: ${metaFrom}\nOggetto: ${metaSubject}\nData: ${metaDate}\n\nCORPO:\n${bodyText}\n`;
 
-CORPO:
-${bodyText}`;
+            // Parsing degli allegati PDF dentro la EML
+            if (email.attachments && email.attachments.length > 0) {
+                combinedText += `\n--- TESTO ESTRATTO DAGLI ALLEGATI PDF ---\n`;
+                for (const att of email.attachments) {
+                    if (att.mimeType === 'application/pdf' || (att.filename && att.filename.toLowerCase().endsWith('.pdf'))) {
+                        try {
+                            const contentBytes = att.content instanceof Uint8Array ? att.content : new Uint8Array(att.content as any);
+                            const pdfResult = await extractTextFromPdf(contentBytes);
+                            combinedText += `\n[ALLEGATO: ${att.filename}]\n${pdfResult.fullText}\n`;
+                        } catch (e) {
+                            console.error("Error parsing attached PDF from EML:", e);
+                            combinedText += `\n[ERRORE DURANTE L'ESTRAZIONE DELL'ALLEGATO: ${att.filename}]\n`;
+                        }
+                    }
+                }
+            }
+
+            text = combinedText;
         } else {
             const decoder = new TextDecoder();
             text = decoder.decode(content);
@@ -160,7 +287,6 @@ ${bodyText}`;
             setIsProcessing(false);
         }
     };
-
 
     const processTextWithAI = async (text: string) => {
         if (!text.trim()) {
@@ -221,27 +347,65 @@ ${bodyText}`;
             setSaveStatus({ type: 'success', msg: 'Intervento aggiunto alla Pandetta con stato APERTO.' });
             setExtracted(null);
             setSourceText('');
+            setSelectedEmail(null);
         } else {
             setSaveStatus({ type: 'error', msg: 'Pandetta non disponibile. Carica prima un file Excel.' });
         }
     };
 
     return (
-        <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
+        <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 relative h-full flex flex-col">
             {isDragging && (
-                <div
-                    className="fixed inset-0 z-[9999] flex items-center justify-center p-12 bg-black/40 backdrop-blur-sm pointer-events-none"
-                >
-                    <div
-                        className="w-full h-full border-4 border-dashed border-primary-500 rounded-3xl flex flex-col items-center justify-center bg-white dark:bg-neutral-900 shadow-2xl animate-in zoom-in-95 duration-200"
-                    >
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-12 bg-black/40 backdrop-blur-sm pointer-events-none">
+                    <div className="w-full h-full border-4 border-dashed border-primary-500 rounded-3xl flex flex-col items-center justify-center bg-white dark:bg-neutral-900 shadow-2xl animate-in zoom-in-95 duration-200">
                         <Upload className="w-20 h-20 text-primary-500 mb-4 animate-bounce" />
                         <h3 className="text-3xl font-black text-neutral-900 dark:text-white mb-2 text-center px-4">Rilascia il file per l'estrazione</h3>
                         <p className="text-xl text-neutral-600 dark:text-neutral-400 text-center px-4">PDF, Word (.doc, .docx) o Email verranno elaborati automaticamente</p>
                     </div>
                 </div>
             )}
-            <div className="flex items-center gap-4 mb-8">
+
+            {/* Impostazioni IMAP Modal */}
+            {showSettings && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-xl max-w-md w-full p-6 animate-in zoom-in-95">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold flex items-center gap-2 dark:text-white"><Mail className="w-5 h-5"/> Configurazione Email Aruba</h3>
+                            <button onClick={() => setShowSettings(false)} className="text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5"/></button>
+                        </div>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Host IMAP</label>
+                                <input type="text" value={emailSettings.host} onChange={e => setEmailSettingsState({...emailSettings, host: e.target.value})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="imap.aruba.it" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Porta (SSL)</label>
+                                <input type="number" value={emailSettings.port} onChange={e => setEmailSettingsState({...emailSettings, port: parseInt(e.target.value)})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Email / Username</label>
+                                <input type="text" value={emailSettings.username} onChange={e => setEmailSettingsState({...emailSettings, username: e.target.value})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="tuonome@aruba.it" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Password</label>
+                                <input type="password" value={emailSettings.password} onChange={e => setEmailSettingsState({...emailSettings, password: e.target.value})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="••••••••" />
+                            </div>
+                            <div className="flex items-center gap-2 pt-2">
+                                <input type="checkbox" id="autoCheck" checked={emailSettings.autoCheck} onChange={e => setEmailSettingsState({...emailSettings, autoCheck: e.target.checked})} className="w-4 h-4 text-primary-600" />
+                                <label htmlFor="autoCheck" className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Sincronizza in automatico in background (ogni 5 min)</label>
+                            </div>
+                        </div>
+
+                        <div className="mt-8 flex justify-end gap-3">
+                            <button onClick={() => setShowSettings(false)} className="px-4 py-2 text-neutral-600 font-bold hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg">Annulla</button>
+                            <button onClick={handleSaveSettings} className="px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700">Salva Credenziali</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <div className="flex items-center gap-4 mb-8 shrink-0">
                 <button
                     onClick={onBack}
                     className="p-2 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
@@ -251,73 +415,130 @@ ${bodyText}`;
                 <div className="flex-1">
                     <h2 className="text-3xl font-extrabold text-neutral-900 dark:text-white flex items-center gap-3">
                         <Brain className="w-8 h-8 text-primary-600" />
-                        Estrazione Automatica Assistenza
+                        AI Hub & Sincronizzazione Email
                     </h2>
-                    <p className="text-neutral-600 dark:text-neutral-400">Analizza email o PDF tecnici e aggiungi i dati automaticamente in Pandetta.</p>
+                    <p className="text-neutral-600 dark:text-neutral-400">Recupera le email da Aruba o carica un PDF/Documento, poi estrai automaticamente i dati per Pandetta.</p>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Left Column: Input */}
-                <div className="space-y-6">
-                    <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6">
-                        <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-4">Sorgente Dati</h3>
-
-                        <button
-                            onClick={handleFileUpload}
-                            disabled={isProcessing}
-                            className="w-full mb-6 border-2 border-dashed border-primary-200 hover:border-primary-500 bg-primary-50/50 dark:border-primary-900 dark:bg-primary-900/10 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-xl p-8 flex flex-col items-center justify-center transition-all disabled:opacity-50"
-                        >
-                            <Upload className="w-10 h-10 text-primary-500 mb-2" />
-                            <span className="font-bold text-primary-700 dark:text-primary-400">Carica PDF, Word (.doc/x) o Email (.eml)</span>
-                        </button>
-
-                        <div className="relative">
-                            <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                                <div className="w-full border-t border-neutral-200 dark:border-neutral-700"></div>
-                            </div>
-                            <div className="relative flex justify-center">
-                                <span className="px-3 bg-white dark:bg-neutral-800 text-sm font-medium text-neutral-500">Oppure incolla il testo</span>
-                            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1 min-h-0">
+                {/* Left Column: Input Source */}
+                <div className="flex flex-col space-y-4 h-full min-h-0">
+                    <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 flex flex-col h-full min-h-0">
+                        
+                        {/* Source Tabs */}
+                        <div className="flex gap-2 mb-6 shrink-0 bg-neutral-100 dark:bg-neutral-900 p-1 rounded-xl">
+                            <button onClick={() => setInputMode('imap')} className={`flex-1 py-2.5 rounded-lg font-bold text-sm flex justify-center items-center gap-2 transition-colors ${inputMode === 'imap' ? 'bg-white dark:bg-neutral-800 shadow-sm text-primary-700 dark:text-primary-400' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
+                                <Mail className="w-4 h-4"/> Inbox IMAP
+                            </button>
+                            <button onClick={() => setInputMode('manual')} className={`flex-1 py-2.5 rounded-lg font-bold text-sm flex justify-center items-center gap-2 transition-colors ${inputMode === 'manual' ? 'bg-white dark:bg-neutral-800 shadow-sm text-primary-700 dark:text-primary-400' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
+                                <Upload className="w-4 h-4"/> Caricamento Manuale
+                            </button>
                         </div>
 
-                        <textarea
-                            value={sourceText}
-                            onChange={(e) => setSourceText(e.target.value)}
-                            placeholder="Incolla qui il testo dell'email di assistenza..."
-                            className="mt-6 w-full h-48 p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 resize-none dark:text-white"
-                        />
-
-                        <button
-                            onClick={handleExtractClick}
-                            disabled={!sourceText.trim()}
-                            className={`w-full mt-4 flex justify-center items-center gap-2 px-5 py-3 font-bold rounded-xl transition-colors 
-                                ${isProcessing
-                                    ? 'bg-red-500 hover:bg-red-600 text-white'
-                                    : 'bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 text-white'}
-                                disabled:opacity-50`}
-                        >
-                            {isProcessing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Brain className="w-5 h-5" />}
-                            <div className="flex flex-col items-center">
-                                <span>{isProcessing ? 'Interrompi Analisi' : 'Analizza con AI'}</span>
-                                {isProcessing && (
-                                    <span className="text-[10px] opacity-80 font-mono">Tempo trascorso: {timerValue.toFixed(1)}s</span>
-                                )}
-                            </div>
-                        </button>
-
-                        {executionTime !== null && !isProcessing && (
-                            <div className="mt-3 flex items-center justify-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 py-2 rounded-lg border border-emerald-100 dark:border-emerald-800 animate-in fade-in slide-in-from-top-2">
-                                <RefreshCw className="w-3 h-3" />
-                                Analisi completata in {executionTime.toFixed(2)} secondi
+                        {/* IMAP Mode Controls */}
+                        {inputMode === 'imap' && (
+                            <div className="flex flex-col flex-1 min-h-0">
+                                <div className="flex justify-between items-center mb-4 shrink-0">
+                                    <button 
+                                        onClick={() => handleFetchEmails(false)} 
+                                        disabled={isFetchingEmails}
+                                        className="flex items-center gap-2 px-4 py-2 bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-white dark:text-neutral-900 text-white text-sm font-bold rounded-lg transition-colors disabled:opacity-50"
+                                    >
+                                        <RefreshCcw className={`w-4 h-4 ${isFetchingEmails ? 'animate-spin' : ''}`}/> 
+                                        {isFetchingEmails ? 'Controllo...' : 'Sincronizza Email'}
+                                    </button>
+                                    <button onClick={() => setShowSettings(true)} className="p-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-700 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 rounded-lg transition-colors">
+                                        <Settings className="w-5 h-5"/>
+                                    </button>
+                                </div>
+                                
+                                {/* Email List */}
+                                <div className="flex-1 overflow-y-auto space-y-2 pr-2 mb-4">
+                                    {emails.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-neutral-400 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-xl">
+                                            <Mail className="w-10 h-10 mb-2 opacity-50" />
+                                            <p className="text-sm font-medium">Nessuna email sincronizzata.</p>
+                                        </div>
+                                    ) : (
+                                        emails.map(e => (
+                                            <div 
+                                                key={e.messageId} 
+                                                onClick={() => handleSelectEmail(e)} 
+                                                className={`p-4 rounded-xl cursor-pointer border transition-all ${selectedEmail?.messageId === e.messageId ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 dark:border-primary-700' : 'border-neutral-200 dark:border-neutral-700 hover:border-primary-300 hover:bg-neutral-50 dark:hover:bg-neutral-700/50'}`}
+                                            >
+                                                <div className="font-bold text-sm text-neutral-900 dark:text-white truncate mb-1">{e.subject}</div>
+                                                <div className="text-xs text-neutral-600 dark:text-neutral-400 truncate">{e.from}</div>
+                                                <div className="text-[10px] text-neutral-400 mt-2 flex justify-between items-center">
+                                                    <span>{e.date}</span>
+                                                    {e.attachments.length > 0 && (
+                                                        <span className="flex items-center gap-1 text-primary-600 font-bold bg-primary-100 dark:bg-primary-900/40 px-2 py-0.5 rounded-full">
+                                                            <Paperclip className="w-3 h-3"/> {e.attachments.length} PDF
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
                             </div>
                         )}
+
+                        {/* Manual Mode Controls */}
+                        {inputMode === 'manual' && (
+                            <div className="shrink-0 mb-6">
+                                <button
+                                    onClick={handleFileUpload}
+                                    disabled={isProcessing}
+                                    className="w-full border-2 border-dashed border-primary-200 hover:border-primary-500 bg-primary-50/50 dark:border-primary-900 dark:bg-primary-900/10 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-xl p-8 flex flex-col items-center justify-center transition-all disabled:opacity-50"
+                                >
+                                    <Upload className="w-10 h-10 text-primary-500 mb-2" />
+                                    <span className="font-bold text-primary-700 dark:text-primary-400">Carica PDF, Word (.doc/x) o Email (.eml)</span>
+                                </button>
+                                <div className="relative">
+                                    <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                                        <div className="w-full border-t border-neutral-200 dark:border-neutral-700"></div>
+                                    </div>
+                                    <div className="relative flex justify-center">
+                                        <span className="px-3 bg-white dark:bg-neutral-800 text-xs font-medium text-neutral-500 uppercase tracking-widest">Oppure incolla il testo</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Unified Text Area & Extract Button */}
+                        <div className="flex flex-col flex-1 shrink-0 h-48 lg:h-auto">
+                            <textarea
+                                value={sourceText}
+                                onChange={(e) => setSourceText(e.target.value)}
+                                placeholder="Il testo da analizzare apparirà qui..."
+                                className="flex-1 w-full p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 resize-none dark:text-white font-mono text-xs"
+                            />
+
+                            <button
+                                onClick={handleExtractClick}
+                                disabled={!sourceText.trim()}
+                                className={`w-full mt-4 shrink-0 flex justify-center items-center gap-2 px-5 py-3 font-bold rounded-xl transition-colors 
+                                    ${isProcessing
+                                        ? 'bg-red-500 hover:bg-red-600 text-white'
+                                        : 'bg-primary-600 hover:bg-primary-700 text-white'}
+                                    disabled:opacity-50`}
+                            >
+                                {isProcessing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Brain className="w-5 h-5" />}
+                                <div className="flex flex-col items-center">
+                                    <span>{isProcessing ? 'Interrompi Analisi' : 'Analizza con AI'}</span>
+                                    {isProcessing && (
+                                        <span className="text-[10px] opacity-80 font-mono">Tempo trascorso: {timerValue.toFixed(1)}s</span>
+                                    )}
+                                </div>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
                 {/* Right Column: Output & Form */}
-                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 flex flex-col">
-                    <div className="flex items-center justify-between mb-6">
+                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 flex flex-col h-full min-h-0">
+                    <div className="flex items-center justify-between mb-6 shrink-0">
                         <h3 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-2">
                             <FileText className="w-5 h-5 text-emerald-500" />
                             Dati Estratti {executionTime !== null && <span className="text-[10px] font-normal text-neutral-400 ml-1">({executionTime.toFixed(2)}s)</span>}
@@ -328,23 +549,23 @@ ${bodyText}`;
                     </div>
 
                     {saveStatus && (
-                        <div className={`p-4 rounded-xl mb-6 text-sm font-semibold flex items-center gap-2
+                        <div className={`shrink-0 p-4 rounded-xl mb-6 text-sm font-semibold flex items-center gap-2
                             ${saveStatus.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30' :
                                 saveStatus.type === 'warning' ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-900/30' :
                                     'bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/30'}
                         `}>
-                            {saveStatus.type === 'success' ? <CheckCircle className="w-5 h-5" /> : null}
+                            {saveStatus.type === 'success' ? <CheckCircle className="w-5 h-5 shrink-0" /> : null}
                             {saveStatus.msg}
                         </div>
                     )}
 
                     {!extracted ? (
-                        <div className="flex-1 flex flex-col items-center justify-center text-neutral-400 p-8 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-xl">
+                        <div className="flex-1 flex flex-col items-center justify-center text-neutral-400 p-8 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-xl min-h-0">
                             <Database className="w-12 h-12 mb-4 opacity-50" />
-                            <p className="text-center font-medium">I dati estratti appariranno qui. Carica un file per iniziare l'analisi.</p>
+                            <p className="text-center font-medium">I dati estratti appariranno qui. Carica un file o seleziona un'email per iniziare l'analisi.</p>
                         </div>
                     ) : (
-                        <div className="flex-1 space-y-4 overflow-y-auto pr-2 pb-4 animate-in fade-in duration-300">
+                        <div className="flex-1 overflow-y-auto space-y-4 pr-2 pb-4 animate-in fade-in duration-300 min-h-0">
                             {[
                                 { key: 'richiestaIntervento', label: 'Richiesta n.' },
                                 { key: 'data', label: 'Data' },
@@ -367,11 +588,11 @@ ${bodyText}`;
                         </div>
                     )}
 
-                    <div className="mt-6 pt-6 border-t border-neutral-100 dark:border-neutral-700">
+                    <div className="mt-6 pt-6 border-t border-neutral-100 dark:border-neutral-700 shrink-0">
                         <button
                             onClick={handleSaveToPandetta}
                             disabled={!extracted || !hasPandettaFile}
-                            className="w-full flex justify-center items-center gap-2 px-5 py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl transition-colors disabled:opacity-50 disabled:hover:bg-primary-600"
+                            className="w-full flex justify-center items-center gap-2 px-5 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors disabled:opacity-50 disabled:hover:bg-emerald-600"
                         >
                             <Database className="w-6 h-6" />
                             Salva in Pandetta

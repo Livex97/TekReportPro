@@ -85,7 +85,8 @@ def main():
     scripts = [
         os.path.join(python_dir, "save_pandetta.py"),
         os.path.join(python_dir, "save_sterlink.py"),
-        os.path.join(python_dir, "read_excel.py")
+        os.path.join(python_dir, "read_excel.py"),
+        os.path.join(python_dir, "check_email.py")
     ]
     
     success_count = 0
