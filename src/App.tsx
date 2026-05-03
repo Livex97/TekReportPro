@@ -596,7 +596,7 @@ className={getNavClasses('settings')}
       </header>
 
       {/* Main Content */}
-      <main className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 ${['pandetta-manager', 'sterlink-manager', 'calendar'].includes(currentView) ? 'h-[calc(100vh-4rem)] p-0 pt-8' : 'py-8'}`}>
+      <main className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 ${['pandetta-manager', 'sterlink-manager', 'calendar', 'ai-extraction'].includes(currentView) ? 'h-[calc(100vh-4rem)] p-0 pt-8' : 'py-8'}`}>
 
         {/* --- VIEW: HOME (DASHBOARD) --- */}
         {currentView === 'home' && (

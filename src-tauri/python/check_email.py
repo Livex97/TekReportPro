@@ -5,6 +5,7 @@ import imaplib
 import email
 from email.header import decode_header
 import base64
+import socket
 import traceback
 
 def clean_text(text):
@@ -40,7 +41,8 @@ def fetch_emails(host, port, username, password, max_emails=15):
     mail = None
     try:
         # Attiviamo il debug di imaplib e catturiamo l'output
-        mail = imaplib.IMAP4_SSL(host, port)
+        # Impostiamo un timeout per la connessione (es. 30 secondi)
+        mail = imaplib.IMAP4_SSL(host, port, timeout=30)
         mail.debug = 4
         
         with redirect_stderr(debug_output):
@@ -156,8 +158,13 @@ def fetch_emails(host, port, username, password, max_emails=15):
 
     except imaplib.IMAP4.error as e:
         return {"success": False, "error": f"Errore IMAP: {str(e)}"}
+    except (socket.timeout, TimeoutError):
+        return {"success": False, "error": f"La connessione al server {host} è andata in timeout. Verifica l'indirizzo host, la porta e la tua connessione internet."}
     except Exception as e:
-        return {"success": False, "error": f"Errore inatteso: {str(e)}", "traceback": traceback.format_exc()}
+        error_str = str(e)
+        if "timeout" in error_str.lower() or "[Errno 60]" in error_str:
+            return {"success": False, "error": f"Timeout della connessione: Il server {host} non ha risposto in tempo. Assicurati che l'host e la porta ({port}) siano corretti."}
+        return {"success": False, "error": f"Errore inatteso: {error_str}", "traceback": traceback.format_exc()}
 
 
 def main():

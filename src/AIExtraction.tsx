@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Upload, FileText, Database, CheckCircle, Brain, RefreshCw, Settings, Mail, RefreshCcw, X, Paperclip } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, Database, CheckCircle, Brain, RefreshCw, Settings, Mail, RefreshCcw, X, Paperclip, Search } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { listen } from '@tauri-apps/api/event';
@@ -8,7 +8,8 @@ import { extractTextFromPdf } from './utils/pdfParser';
 import { extractTextFromDocx } from './utils/docxParser';
 import { generateOllamaExtraction, type ExtractedData } from './utils/ollama';
 import { sendAppNotification } from './utils/notifications';
-import { getEmailSettings, setEmailSettings, type EmailSettings, DEFAULT_EMAIL_SETTINGS } from './utils/storage';
+import { getEmailSettings, setEmailSettings, type EmailSettings, DEFAULT_EMAIL_SETTINGS, getGoogleSettings, getEmailsJson, saveEmailsJson, getProcessedEmailIds, addProcessedEmailId, getExcelDataJson } from './utils/storage';
+import { fetchGmailEmails, refreshAccessToken } from './utils/googleCalendar';
 import PostalMime from 'postal-mime';
 
 interface AIExtractionProps {
@@ -28,6 +29,43 @@ interface FetchedEmail {
     attachments: { filename: string, mimeType: string, data: string }[];
 }
 
+const formatDateItalian = (dateStr: string) => {
+    try {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr;
+        return d.toLocaleString('it-IT', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } catch {
+        return dateStr;
+    }
+};
+
+const HighlightedText = ({ text, highlight }: { text: string, highlight: string }) => {
+    if (!highlight.trim()) return <>{text}</>;
+
+    const regex = new RegExp(`(${highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const parts = text.split(regex);
+
+    return (
+        <>
+            {parts.map((part, i) =>
+                regex.test(part) ? (
+                    <mark key={i} className="bg-primary-200 dark:bg-primary-900/60 dark:text-primary-100 rounded-sm px-0.5">
+                        {part}
+                    </mark>
+                ) : (
+                    part
+                )
+            )}
+        </>
+    );
+};
+
 export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExtractionProps) {
     const [sourceText, setSourceText] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
@@ -45,21 +83,53 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
     const [emails, setEmails] = useState<FetchedEmail[]>([]);
     const [selectedEmail, setSelectedEmail] = useState<FetchedEmail | null>(null);
     const [isFetchingEmails, setIsFetchingEmails] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [processedIds, setProcessedIds] = useState<string[]>([]);
+    const [pandettaRows, setPandettaRows] = useState<any[]>([]);
 
     useEffect(() => {
         // Carica impostazioni email
         getEmailSettings().then(setEmailSettingsState);
+        // Carica email locali
+        getEmailsJson().then(saved => {
+            if (saved && Array.isArray(saved)) {
+                setEmails(saved);
+            }
+        });
+        // Carica messageId processati e righe pandetta per controlli incrociati
+        getProcessedEmailIds().then(setProcessedIds);
+        getExcelDataJson('pandetta').then(data => {
+            if (data) setPandettaRows(data);
+        });
     }, []);
 
-    // Polling automatico se abilitato
+    // Polling automatico e sincronizzazione al focus
     useEffect(() => {
         let intervalId: any;
-        if (emailSettings.autoCheck && emailSettings.username && emailSettings.password) {
-            intervalId = setInterval(() => {
-                handleFetchEmails(true);
-            }, 5 * 60 * 1000); // 5 minuti
+
+        const performSync = () => {
+            if (emailSettings.autoCheck) {
+                // Se siamo in modalità Gmail, verifichiamo di avere il token
+                getGoogleSettings().then(googleSettings => {
+                    if (googleSettings?.accessToken || (emailSettings.username && emailSettings.password)) {
+                        handleFetchEmails(true);
+                    }
+                });
+            }
+        };
+
+        if (emailSettings.autoCheck) {
+            // Sincronizza ogni 2 minuti invece di 5 per un feeling più real-time
+            intervalId = setInterval(performSync, 2 * 60 * 1000);
+
+            // Sincronizza anche quando l'utente torna sull'app (focus finestra)
+            window.addEventListener('focus', performSync);
         }
-        return () => clearInterval(intervalId);
+
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+            window.removeEventListener('focus', performSync);
+        };
     }, [emailSettings.autoCheck, emailSettings.username, emailSettings.password]);
 
     useEffect(() => {
@@ -122,7 +192,101 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
         setSaveStatus({ type: 'success', msg: 'Impostazioni IMAP salvate.' });
     };
 
+    const isEmailRelevant = (email: FetchedEmail) => {
+        const keywords = ['richiesta', 'si richiede', 'odl', 'sopralluogo', 'assistenza tecnica', 'manutenzione', 'riparazione', 'intervento in garanzia', 'guasto'];
+        const lowerSubj = email.subject.toLowerCase();
+        const lowerBody = email.body.toLowerCase();
+        return keywords.some(k => lowerSubj.includes(k) || lowerBody.includes(k));
+    };
+
+    const isEmailInPandetta = (email: FetchedEmail) => {
+        // 1. Controllo ID processato
+        if (processedIds.includes(email.messageId)) return true;
+
+        // 2. Controllo incrociato con Pandetta (testo in Oggetto o Corpo)
+        const lowerSubj = email.subject.toLowerCase();
+        const lowerBody = email.body.toLowerCase();
+
+        for (const row of pandettaRows) {
+            if (row._empty) continue;
+
+            // Cerca se la Richiesta/ODL della pandetta è menzionata nell'email
+            const keys = Object.keys(row);
+            const reqKey = keys.find(k => k.toUpperCase().includes('RICHIESTA'));
+            if (reqKey) {
+                const richiesta = String(row[reqKey] || '').toLowerCase().trim();
+                // Assumiamo che se l'ODL è di almeno 3 caratteri ed è presente, sia un match
+                if (richiesta.length > 3 && (lowerSubj.includes(richiesta) || lowerBody.includes(richiesta))) {
+                    return true;
+                }
+            }
+
+            // Prova con Cliente (se nome molto specifico > 5 caratteri ed è nell'oggetto)
+            const cliKey = keys.find(k => k.toUpperCase().includes('CLIENTE'));
+            if (cliKey) {
+                const cliente = String(row[cliKey] || '').toLowerCase().trim();
+                if (cliente.length > 5 && lowerSubj.includes(cliente)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    };
+
     const handleFetchEmails = async (silent = false) => {
+        // Se usiamo Gmail API, non servono username/password IMAP ma i token Google
+        if (emailSettings.useGmailAPI) {
+            setIsFetchingEmails(true);
+            if (!silent) setSaveStatus(null);
+            try {
+                const gSettings = await getGoogleSettings();
+                if (!gSettings.enabled || !gSettings.refreshToken) {
+                    if (!silent) setSaveStatus({ type: 'warning', msg: 'Integrazione Google non configurata. Vai in Impostazioni -> Google Calendar.' });
+                    return;
+                }
+
+                let token = gSettings.accessToken;
+                // Check expiry (con margine di 1 minuto)
+                if (!token || !gSettings.expiryDate || Date.now() > gSettings.expiryDate - 60000) {
+                    const newTokens = await refreshAccessToken(gSettings.refreshToken, gSettings.clientId, gSettings.clientSecret);
+                    token = newTokens.accessToken;
+                }
+
+                const gmailEmails = await fetchGmailEmails(token, emailSettings.maxEmails || 15);
+
+                let newCount = 0;
+                setEmails(prev => {
+                    const existingIds = new Set(prev.map(e => e.messageId));
+                    // Filtra solo le nuove email E che contengono le keyword
+                    const filteredNew = gmailEmails.filter(e => !existingIds.has(e.messageId) && isEmailRelevant(e));
+                    newCount = filteredNew.length;
+
+                    if (newCount > 0) {
+                        const combined = [...filteredNew, ...prev];
+                        const unique = Array.from(new Map(combined.map(item => [item.messageId, item])).values());
+                        saveEmailsJson(unique);
+                        return unique;
+                    }
+                    return prev;
+                });
+
+                if (newCount > 0) {
+                    sendAppNotification("Nuove Email (Gmail)", `Trovati ${newCount} nuovi messaggi rilevanti.`);
+                    if (!silent) setSaveStatus({ type: 'success', msg: `Sincronizzazione Gmail completata: ${newCount} nuovi messaggi rilevanti.` });
+                } else {
+                    if (!silent) setSaveStatus({ type: 'success', msg: `Nessun nuovo messaggio rilevante Gmail.` });
+                }
+                return;
+            } catch (error: any) {
+                console.error("Gmail fetch error:", error);
+                if (!silent) setSaveStatus({ type: 'error', msg: `Errore Gmail API: ${error.message}` });
+                return;
+            } finally {
+                setIsFetchingEmails(false);
+            }
+        }
+
         if (!emailSettings.username || !emailSettings.password) {
             if (!silent) {
                 setSaveStatus({ type: 'warning', msg: 'Configura le credenziali email nelle impostazioni (icona ingranaggio).' });
@@ -134,23 +298,29 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
         if (!silent) setSaveStatus(null);
         try {
             const result: any = await invoke('check_email_command', { settings: emailSettings });
-            
+
             if (result.success) {
                 const newEmails = result.emails as FetchedEmail[];
                 let newCount = 0;
                 setEmails(prev => {
                     const existingIds = new Set(prev.map(e => e.messageId));
-                    newCount = newEmails.filter(e => !existingIds.has(e.messageId)).length;
-                    
-                    const combined = [...newEmails, ...prev];
-                    const unique = Array.from(new Map(combined.map(item => [item.messageId, item])).values());
-                    return unique;
+                    // Filtra solo le nuove email E che contengono le keyword
+                    const filteredNew = newEmails.filter(e => !existingIds.has(e.messageId) && isEmailRelevant(e));
+                    newCount = filteredNew.length;
+
+                    if (newCount > 0) {
+                        const combined = [...filteredNew, ...prev];
+                        const unique = Array.from(new Map(combined.map(item => [item.messageId, item])).values());
+                        saveEmailsJson(unique);
+                        return unique;
+                    }
+                    return prev;
                 });
                 if (newCount > 0) {
-                    sendAppNotification("Nuove Email", `Trovati ${newCount} nuovi messaggi in arrivo.`);
-                    if (!silent) setSaveStatus({ type: 'success', msg: `Sincronizzazione completata: ${newCount} nuovi messaggi.` });
+                    sendAppNotification("Nuove Email", `Trovati ${newCount} nuovi messaggi rilevanti in arrivo.`);
+                    if (!silent) setSaveStatus({ type: 'success', msg: `Sincronizzazione completata: ${newCount} nuovi messaggi rilevanti.` });
                 } else {
-                    if (!silent) setSaveStatus({ type: 'success', msg: `Nessun nuovo messaggio trovato.` });
+                    if (!silent) setSaveStatus({ type: 'success', msg: `Nessun nuovo messaggio rilevante trovato.` });
                 }
             } else {
                 if (!silent) setSaveStatus({ type: 'error', msg: result.error || 'Errore durante la sincronizzazione IMAP.' });
@@ -166,9 +336,9 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
         setSelectedEmail(email);
         setIsProcessing(false);
         setSaveStatus(null);
-        
-        let combinedText = `METADATI:\nDa: ${email.from}\nOggetto: ${email.subject}\nData: ${email.date}\n\nCORPO:\n${email.body}\n`;
-        
+
+        let combinedText = `METADATI:\nDa: ${email.from}\nOggetto: ${email.subject}\nData: ${formatDateItalian(email.date)}\n\nCORPO:\n${email.body}\n`;
+
         // Process PDF attachments
         if (email.attachments && email.attachments.length > 0) {
             combinedText += `\n--- TESTO ESTRATTO DAGLI ALLEGATI PDF ---\n`;
@@ -189,7 +359,7 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                 }
             }
         }
-        
+
         setSourceText(combinedText);
         setExtracted(null);
     };
@@ -344,6 +514,11 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
 
         if (onAddToPandetta) {
             onAddToPandetta(extracted);
+            if (selectedEmail) {
+                addProcessedEmailId(selectedEmail.messageId).then(() => {
+                    setProcessedIds(prev => [...prev, selectedEmail.messageId]);
+                });
+            }
             setSaveStatus({ type: 'success', msg: 'Intervento aggiunto alla Pandetta con stato APERTO.' });
             setExtracted(null);
             setSourceText('');
@@ -370,29 +545,82 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                     <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-xl max-w-md w-full p-6 animate-in zoom-in-95">
                         <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-bold flex items-center gap-2 dark:text-white"><Mail className="w-5 h-5"/> Configurazione Email Aruba</h3>
-                            <button onClick={() => setShowSettings(false)} className="text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5"/></button>
+                            <h3 className="text-xl font-bold flex items-center gap-2 dark:text-white"><Mail className="w-5 h-5" /> Configurazione Email Aruba</h3>
+                            <button onClick={() => setShowSettings(false)} className="text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
                         </div>
-                        
+
                         <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Host IMAP</label>
-                                <input type="text" value={emailSettings.host} onChange={e => setEmailSettingsState({...emailSettings, host: e.target.value})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="imap.aruba.it" />
+                            <div className="bg-neutral-50 dark:bg-neutral-900/50 p-3 rounded-xl border border-neutral-100 dark:border-neutral-700">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-8 h-8 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
+                                            <Mail className="w-4 h-4 text-red-600" />
+                                        </div>
+                                        <div>
+                                            <div className="text-sm font-bold dark:text-white">Usa Google / Gmail API</div>
+                                            <div className="text-[10px] text-neutral-500">Usa l'account Google collegato al Calendario</div>
+                                        </div>
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={emailSettings.useGmailAPI}
+                                        onChange={e => setEmailSettingsState({ ...emailSettings, useGmailAPI: e.target.checked })}
+                                        className="w-5 h-5 text-primary-600 rounded"
+                                    />
+                                </div>
                             </div>
+
+                            {!emailSettings.useGmailAPI && (
+                                <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                    <div>
+                                        <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Provider Predefinito</label>
+                                        <select
+                                            className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white"
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                if (val === 'aruba') {
+                                                    setEmailSettingsState({ ...emailSettings, host: 'imap.aruba.it', port: 993 });
+                                                } else if (val === 'yahoo') {
+                                                    setEmailSettingsState({ ...emailSettings, host: 'imap.mail.yahoo.com', port: 993 });
+                                                } else if (val === 'gmail') {
+                                                    setEmailSettingsState({ ...emailSettings, host: 'imap.gmail.com', port: 993 });
+                                                } else if (val === 'outlook') {
+                                                    setEmailSettingsState({ ...emailSettings, host: 'imap-mail.outlook.com', port: 993 });
+                                                }
+                                            }}
+                                        >
+                                            <option value="">-- Seleziona o inserisci manuale --</option>
+                                            <option value="aruba">Aruba</option>
+                                            <option value="yahoo">Yahoo Mail</option>
+                                            <option value="gmail">Gmail (via IMAP)</option>
+                                            <option value="outlook">Outlook / Hotmail</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Host IMAP</label>
+                                        <input type="text" value={emailSettings.host} onChange={e => setEmailSettingsState({ ...emailSettings, host: e.target.value })} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="imap.aruba.it" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Porta (SSL)</label>
+                                        <input type="number" value={emailSettings.port} onChange={e => setEmailSettingsState({ ...emailSettings, port: parseInt(e.target.value) })} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Email / Username</label>
+                                        <input type="text" value={emailSettings.username} onChange={e => setEmailSettingsState({ ...emailSettings, username: e.target.value })} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="tuonome@dominio.it" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Password</label>
+                                        <input type="password" value={emailSettings.password} onChange={e => setEmailSettingsState({ ...emailSettings, password: e.target.value })} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="••••••••" />
+                                    </div>
+                                </div>
+                            )}
+
                             <div>
-                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Porta (SSL)</label>
-                                <input type="number" value={emailSettings.port} onChange={e => setEmailSettingsState({...emailSettings, port: parseInt(e.target.value)})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Email / Username</label>
-                                <input type="text" value={emailSettings.username} onChange={e => setEmailSettingsState({...emailSettings, username: e.target.value})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="tuonome@aruba.it" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Password</label>
-                                <input type="password" value={emailSettings.password} onChange={e => setEmailSettingsState({...emailSettings, password: e.target.value})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="••••••••" />
+                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Max Email da scaricare</label>
+                                <input type="number" value={emailSettings.maxEmails} onChange={e => setEmailSettingsState({ ...emailSettings, maxEmails: parseInt(e.target.value) })} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" />
                             </div>
                             <div className="flex items-center gap-2 pt-2">
-                                <input type="checkbox" id="autoCheck" checked={emailSettings.autoCheck} onChange={e => setEmailSettingsState({...emailSettings, autoCheck: e.target.checked})} className="w-4 h-4 text-primary-600" />
+                                <input type="checkbox" id="autoCheck" checked={emailSettings.autoCheck} onChange={e => setEmailSettingsState({ ...emailSettings, autoCheck: e.target.checked })} className="w-4 h-4 text-primary-600" />
                                 <label htmlFor="autoCheck" className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Sincronizza in automatico in background (ogni 5 min)</label>
                             </div>
                         </div>
@@ -417,7 +645,7 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                         <Brain className="w-8 h-8 text-primary-600" />
                         AI Hub & Sincronizzazione Email
                     </h2>
-                    <p className="text-neutral-600 dark:text-neutral-400">Recupera le email da Aruba o carica un PDF/Documento, poi estrai automaticamente i dati per Pandetta.</p>
+                    <p className="text-neutral-600 dark:text-neutral-400">Recupera le email da Aruba, Yahoo, Gmail o carica un PDF/Documento, poi estrai automaticamente i dati per Pandetta.</p>
                 </div>
             </div>
 
@@ -425,34 +653,46 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                 {/* Left Column: Input Source */}
                 <div className="flex flex-col space-y-4 h-full min-h-0">
                     <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 flex flex-col h-full min-h-0">
-                        
+
                         {/* Source Tabs */}
                         <div className="flex gap-2 mb-6 shrink-0 bg-neutral-100 dark:bg-neutral-900 p-1 rounded-xl">
                             <button onClick={() => setInputMode('imap')} className={`flex-1 py-2.5 rounded-lg font-bold text-sm flex justify-center items-center gap-2 transition-colors ${inputMode === 'imap' ? 'bg-white dark:bg-neutral-800 shadow-sm text-primary-700 dark:text-primary-400' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
-                                <Mail className="w-4 h-4"/> Inbox IMAP
+                                <Mail className="w-4 h-4" /> Inbox IMAP
                             </button>
                             <button onClick={() => setInputMode('manual')} className={`flex-1 py-2.5 rounded-lg font-bold text-sm flex justify-center items-center gap-2 transition-colors ${inputMode === 'manual' ? 'bg-white dark:bg-neutral-800 shadow-sm text-primary-700 dark:text-primary-400' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
-                                <Upload className="w-4 h-4"/> Caricamento Manuale
+                                <Upload className="w-4 h-4" /> Caricamento Manuale
                             </button>
                         </div>
 
                         {/* IMAP Mode Controls */}
                         {inputMode === 'imap' && (
-                            <div className="flex flex-col flex-1 min-h-0">
-                                <div className="flex justify-between items-center mb-4 shrink-0">
-                                    <button 
-                                        onClick={() => handleFetchEmails(false)} 
+                            <div className="flex flex-col flex-[1.2] min-h-0">
+                                <div className="flex gap-2 items-center mb-4 shrink-0">
+                                    <button
+                                        onClick={() => handleFetchEmails(false)}
                                         disabled={isFetchingEmails}
                                         className="flex items-center gap-2 px-4 py-2 bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-white dark:text-neutral-900 text-white text-sm font-bold rounded-lg transition-colors disabled:opacity-50"
                                     >
-                                        <RefreshCcw className={`w-4 h-4 ${isFetchingEmails ? 'animate-spin' : ''}`}/> 
-                                        {isFetchingEmails ? 'Controllo...' : 'Sincronizza Email'}
+                                        <RefreshCcw className={`w-4 h-4 ${isFetchingEmails ? 'animate-spin' : ''}`} />
+                                        {isFetchingEmails ? '...' : 'Sincronizza'}
                                     </button>
+
+                                    <div className="flex-1 relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+                                        <input
+                                            type="text"
+                                            placeholder="Cerca nelle email..."
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            className="w-full pl-9 pr-4 py-2 bg-neutral-100 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary-500"
+                                        />
+                                    </div>
+
                                     <button onClick={() => setShowSettings(true)} className="p-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-700 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 rounded-lg transition-colors">
-                                        <Settings className="w-5 h-5"/>
+                                        <Settings className="w-5 h-5" />
                                     </button>
                                 </div>
-                                
+
                                 {/* Email List */}
                                 <div className="flex-1 overflow-y-auto space-y-2 pr-2 mb-4">
                                     {emails.length === 0 ? (
@@ -461,24 +701,56 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                                             <p className="text-sm font-medium">Nessuna email sincronizzata.</p>
                                         </div>
                                     ) : (
-                                        emails.map(e => (
-                                            <div 
-                                                key={e.messageId} 
-                                                onClick={() => handleSelectEmail(e)} 
-                                                className={`p-4 rounded-xl cursor-pointer border transition-all ${selectedEmail?.messageId === e.messageId ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 dark:border-primary-700' : 'border-neutral-200 dark:border-neutral-700 hover:border-primary-300 hover:bg-neutral-50 dark:hover:bg-neutral-700/50'}`}
-                                            >
-                                                <div className="font-bold text-sm text-neutral-900 dark:text-white truncate mb-1">{e.subject}</div>
-                                                <div className="text-xs text-neutral-600 dark:text-neutral-400 truncate">{e.from}</div>
-                                                <div className="text-[10px] text-neutral-400 mt-2 flex justify-between items-center">
-                                                    <span>{e.date}</span>
-                                                    {e.attachments.length > 0 && (
-                                                        <span className="flex items-center gap-1 text-primary-600 font-bold bg-primary-100 dark:bg-primary-900/40 px-2 py-0.5 rounded-full">
-                                                            <Paperclip className="w-3 h-3"/> {e.attachments.length} PDF
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))
+                                        (() => {
+                                            const filtered = emails.filter(e =>
+                                                e.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                                e.from.toLowerCase().includes(searchQuery.toLowerCase())
+                                            );
+
+                                            if (filtered.length === 0 && searchQuery) {
+                                                return (
+                                                    <div className="h-full flex flex-col items-center justify-center text-neutral-400">
+                                                        <Search className="w-8 h-8 mb-2 opacity-30" />
+                                                        <p className="text-xs">Nessun risultato per "{searchQuery}"</p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            return (
+                                                <>
+                                                    {filtered.map(e => {
+                                                        const isNewRequest = !isEmailInPandetta(e);
+                                                        return (
+                                                            <div
+                                                                key={e.messageId}
+                                                                onClick={() => handleSelectEmail(e)}
+                                                                className={`p-4 rounded-xl cursor-pointer border transition-all relative ${selectedEmail?.messageId === e.messageId ? 'border-primary-500 bg-primary-100/50 dark:bg-primary-900/20 dark:border-primary-700' : isNewRequest ? 'border-amber-400 dark:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/10' : 'border-neutral-200 dark:border-neutral-700 hover:border-primary-300 hover:bg-neutral-100/50 dark:hover:bg-neutral-700/50'}`}
+                                                            >
+                                                                {isNewRequest && (
+                                                                    <div className="absolute top-0 right-0 -mt-2 -mr-2 bg-amber-500 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-full shadow-sm animate-pulse">
+                                                                        Nuova Richiesta
+                                                                    </div>
+                                                                )}
+                                                                <div className={`font-bold text-sm truncate mb-1 pr-6 ${isNewRequest ? 'text-amber-900 dark:text-amber-100' : 'text-neutral-900 dark:text-white'}`}>
+                                                                    <HighlightedText text={e.subject} highlight={searchQuery} />
+                                                                </div>
+                                                                <div className={`text-xs truncate ${isNewRequest ? 'text-amber-700 dark:text-amber-300' : 'text-neutral-600 dark:text-neutral-400'}`}>
+                                                                    <HighlightedText text={e.from} highlight={searchQuery} />
+                                                                </div>
+                                                                <div className="text-[10px] text-neutral-400 mt-2 flex justify-between items-center">
+                                                                    <span className={isNewRequest ? 'text-amber-600/70 dark:text-amber-400/70' : ''}>{formatDateItalian(e.date)}</span>
+                                                                    {e.attachments.length > 0 && (
+                                                                        <span className="flex items-center gap-1 text-primary-600 font-bold bg-primary-100 dark:bg-primary-900/40 px-2 py-0.5 rounded-full">
+                                                                            <Paperclip className="w-3 h-3" /> {e.attachments.length} PDF
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </>
+                                            );
+                                        })()
                                     )}
                                 </div>
                             </div>
@@ -507,12 +779,12 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                         )}
 
                         {/* Unified Text Area & Extract Button */}
-                        <div className="flex flex-col flex-1 shrink-0 h-48 lg:h-auto">
+                        <div className="flex flex-col flex-1 min-h-0 mt-4">
                             <textarea
                                 value={sourceText}
                                 onChange={(e) => setSourceText(e.target.value)}
                                 placeholder="Il testo da analizzare apparirà qui..."
-                                className="flex-1 w-full p-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 resize-none dark:text-white font-mono text-xs"
+                                className="flex-1 w-full p-4 bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 resize-none dark:text-white font-mono text-xs"
                             />
 
                             <button
@@ -575,7 +847,7 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                                 { key: 'tipoDiAttivitaGuasto', label: 'Problema Segnalato / Attività' },
                                 { key: 'tecnico', label: 'Tecnico (se assegnato)' }
                             ].map(({ key, label }) => (
-                                <div key={key} className="bg-neutral-50 dark:bg-neutral-700/30 p-3 rounded-lg border border-neutral-100 dark:border-neutral-700">
+                                <div key={key} className="bg-neutral-100 dark:bg-neutral-700/30 p-3 rounded-lg border border-neutral-200 dark:border-neutral-700">
                                     <label className="block text-xs font-bold text-neutral-500 tracking-wide uppercase mb-1">{label}</label>
                                     <input
                                         type="text"

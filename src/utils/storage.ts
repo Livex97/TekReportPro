@@ -359,6 +359,7 @@ export interface EmailSettings {
     password?: string;
     autoCheck: boolean;
     maxEmails: number;
+    useGmailAPI?: boolean;
 }
 
 export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
@@ -687,6 +688,50 @@ export async function getExcelDataJson(type: 'pandetta' | 'sterlink'): Promise<a
         return JSON.parse(new TextDecoder().decode(content));
     } catch (e) {
         return undefined;
+    }
+}
+
+/**
+ * Saves emails data as JSON to Local Disk (AppData)
+ */
+export async function saveEmailsJson(emails: any[]) {
+    try {
+        await mkdir('excel', { baseDir: BaseDirectory.AppData, recursive: true });
+        await writeFile(`excel/emails_data.json`, new TextEncoder().encode(JSON.stringify(emails)), { baseDir: BaseDirectory.AppData });
+    } catch (e) {
+        console.error(`[Storage] Error saving emails JSON data:`, e);
+    }
+}
+
+/**
+ * Retrieves emails data as JSON from Local Disk
+ */
+export async function getEmailsJson(): Promise<any[] | undefined> {
+    try {
+        const content = await readFile(`excel/emails_data.json`, { baseDir: BaseDirectory.AppData });
+        return JSON.parse(new TextDecoder().decode(content));
+    } catch (e) {
+        return undefined;
+    }
+}
+
+/**
+ * Gets the list of processed messageIds
+ */
+export async function getProcessedEmailIds(): Promise<string[]> {
+    return await getSetting<string[]>('processed_email_ids', []);
+}
+
+/**
+ * Adds a processed messageId
+ */
+export async function addProcessedEmailId(messageId: string): Promise<void> {
+    const ids = await getProcessedEmailIds();
+    if (!ids.includes(messageId)) {
+        ids.push(messageId);
+        await setSetting('processed_email_ids', ids);
+        const store = await getStore();
+        await store.save();
     }
 }
 

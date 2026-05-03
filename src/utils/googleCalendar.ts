@@ -26,7 +26,7 @@ export function getGoogleAuthUrl(clientId: string): string {
     client_id: clientId,
     redirect_uri: REDIRECT_URI,
     response_type: "code",
-    scope: "https://www.googleapis.com/auth/calendar.events",
+    scope: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly",
     access_type: "offline",
     prompt: "consent"
   });
@@ -247,4 +247,85 @@ export async function fetchGoogleCalendarEvents(token: string, timeMin?: string,
 
     const data = await resp.json();
     return data.items || [];
+}
+
+/**
+ * Fetches recent emails from Gmail using the Gmail API.
+ * @param token Google access token
+ * @param maxResults Number of emails to fetch
+ * @returns Array of FetchedEmail objects
+ */
+export async function fetchGmailEmails(token: string, maxResults: number = 15): Promise<any[]> {
+    const listResp = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!listResp.ok) {
+        const err = await listResp.json();
+        throw new Error(err.error?.message || "Errore durante il recupero della lista email da Gmail");
+    }
+
+    const listData = await listResp.json();
+    const messages = listData.messages || [];
+    const results = [];
+
+    for (const msg of messages) {
+        const detailResp = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!detailResp.ok) continue;
+
+        const detail = await detailResp.json();
+        const headers = detail.payload.headers;
+        const subject = headers.find((h: any) => h.name.toLowerCase() === 'subject')?.value || '(Nessun oggetto)';
+        const from = headers.find((h: any) => h.name.toLowerCase() === 'from')?.value || '';
+        const date = headers.find((h: any) => h.name.toLowerCase() === 'date')?.value || '';
+
+        let body = "";
+        let attachments: any[] = [];
+
+        const processPart = async (part: any) => {
+            if (part.mimeType === "text/plain" && part.body.data) {
+                // Gmail uses URL-safe base64
+                const base64 = part.body.data.replace(/-/g, '+').replace(/_/g, '/');
+                body += decodeURIComponent(escape(atob(base64)));
+            } else if (part.mimeType === "application/pdf" && part.body.attachmentId) {
+                // Fetch attachment content
+                const attResp = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}/attachments/${part.body.attachmentId}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (attResp.ok) {
+                    const attData = await attResp.json();
+                    // Convert URL-safe base64 to standard base64 for the UI
+                    const standardBase64 = attData.data.replace(/-/g, '+').replace(/_/g, '/');
+                    attachments.push({
+                        filename: part.filename,
+                        mimeType: part.mimeType,
+                        data: standardBase64
+                    });
+                }
+            }
+
+            if (part.parts) {
+                for (const subPart of part.parts) {
+                    await processPart(subPart);
+                }
+            }
+        };
+
+        await processPart(detail.payload);
+
+        results.push({
+            id: msg.id,
+            messageId: detail.threadId, // Use threadId as messageId for uniqueness in UI
+            subject,
+            from,
+            date,
+            body,
+            attachments
+        });
+    }
+
+    return results;
 }

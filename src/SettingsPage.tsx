@@ -944,7 +944,7 @@ export default function SettingsPage({
                       <LucideIcons.Cloud className="w-7 h-7 text-emerald-600" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-black text-neutral-900 dark:text-white">Sincronizzazione Google Calendar</h3>
+                      <h3 className="text-xl font-black text-neutral-900 dark:text-white">Sincronizzazione Google</h3>
                       <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Configura le chiavi API per mantenere sincronizzati i tuoi lavori.</p>
                     </div>
                   </div>
@@ -1084,6 +1084,10 @@ export default function SettingsPage({
                             2. Accetta le autorizzazioni nel browser
                             <br />
                             3. Copia il codice fornito e incollalo qui sotto
+                            <br />
+                            <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-lg text-[10px] text-red-600 dark:text-red-400 font-bold">
+                              Nota: Al primo accesso Google mostrerà "App non verificata". Clicca su "Avanzate" -&gt; "Vai a [App] (non sicura)" per procedere. Assicurati di aver aggiunto la tua mail ai "Test Users" nella Google Cloud Console.
+                            </div>
                           </p>
                           <button
                             onClick={onGoogleAuth}
