@@ -6,9 +6,9 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { extractTextFromPdf } from './utils/pdfParser';
 import { extractTextFromDocx } from './utils/docxParser';
-import { generateOllamaExtraction, type ExtractedData } from './utils/ollama';
+import { generateAiExtraction, type ExtractedData } from './utils/ollama';
 import { sendAppNotification } from './utils/notifications';
-import { getEmailSettings, setEmailSettings, type EmailSettings, DEFAULT_EMAIL_SETTINGS, getGoogleSettings, getEmailsJson, saveEmailsJson, getProcessedEmailIds, addProcessedEmailId, getExcelDataJson } from './utils/storage';
+import { getAiSettings, setAiSettings, type AiSettings, DEFAULT_AI_SETTINGS, getEmailSettings, setEmailSettings, type EmailSettings, DEFAULT_EMAIL_SETTINGS, getGoogleSettings, getEmailsJson, saveEmailsJson, getProcessedEmailIds, addProcessedEmailId, getExcelDataJson } from './utils/storage';
 import { fetchGmailEmails, refreshAccessToken } from './utils/googleCalendar';
 import PostalMime from 'postal-mime';
 
@@ -86,6 +86,8 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
     const [searchQuery, setSearchQuery] = useState('');
     const [processedIds, setProcessedIds] = useState<string[]>([]);
     const [pandettaRows, setPandettaRows] = useState<any[]>([]);
+    const [aiSettings, setAiSettingsState] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
+    const [showAiSettings, setShowAiSettings] = useState(false);
 
     useEffect(() => {
         // Carica impostazioni email
@@ -101,6 +103,8 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
         getExcelDataJson('pandetta').then(data => {
             if (data) setPandettaRows(data);
         });
+        // Carica impostazioni AI
+        getAiSettings().then(setAiSettingsState);
     }, []);
 
     // Polling automatico e sincronizzazione al focus
@@ -190,6 +194,12 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
         await setEmailSettings(emailSettings);
         setShowSettings(false);
         setSaveStatus({ type: 'success', msg: 'Impostazioni IMAP salvate.' });
+    };
+
+    const handleSaveAiSettings = async () => {
+        await setAiSettings(aiSettings);
+        setShowAiSettings(false);
+        setSaveStatus({ type: 'success', msg: 'Impostazioni AI salvate.' });
     };
 
     const isEmailRelevant = (email: FetchedEmail) => {
@@ -473,7 +483,7 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
         const startTime = Date.now();
 
         try {
-            const result = await generateOllamaExtraction(text, controller.signal);
+            const result = await generateAiExtraction(text, controller.signal);
             const endTime = Date.now();
             setExecutionTime((endTime - startTime) / 1000);
             setExtracted(result);
@@ -482,7 +492,7 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
             if (error.name === 'AbortError') {
                 setSaveStatus({ type: 'warning', msg: 'Analisi interrotta dall\'utente.' });
             } else {
-                setSaveStatus({ type: 'error', msg: error.message || 'Errore di connessione a Ollama.' });
+                setSaveStatus({ type: 'error', msg: error.message || 'Errore di connessione all\'AI.' });
             }
         } finally {
             setIsProcessing(false);
@@ -645,7 +655,15 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                         <Brain className="w-8 h-8 text-primary-600" />
                         AI Hub & Sincronizzazione Email
                     </h2>
-                    <p className="text-neutral-600 dark:text-neutral-400">Recupera le email da Aruba, Yahoo, Gmail o carica un PDF/Documento, poi estrai automaticamente i dati per Pandetta.</p>
+                    <div className="flex items-center gap-4">
+                        <p className="text-neutral-600 dark:text-neutral-400">Recupera le email o carica documenti, poi estrai i dati con {aiSettings.provider === 'ollama' ? 'Ollama' : 'OpenRouter'}.</p>
+                        <button 
+                            onClick={() => setShowAiSettings(true)}
+                            className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-lg hover:bg-primary-200 dark:hover:bg-primary-900/50 transition-colors"
+                        >
+                            <Settings className="w-3.5 h-3.5" /> Configura AI
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -851,7 +869,7 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                                     <label className="block text-xs font-bold text-neutral-500 tracking-wide uppercase mb-1">{label}</label>
                                     <input
                                         type="text"
-                                        value={extracted[key as keyof ExtractedData]}
+                                        value={extracted[key as keyof ExtractedData] || ''}
                                         onChange={(e) => handleFieldChange(key as keyof ExtractedData, e.target.value)}
                                         className="w-full bg-transparent border-none outline-none focus:ring-0 p-0 text-neutral-900 dark:text-white text-sm font-semibold"
                                     />
@@ -872,6 +890,95 @@ export function AIExtraction({ onBack, onAddToPandetta, hasPandettaFile }: AIExt
                     </div>
                 </div>
             </div>
+            {/* AI Settings Modal */}
+            {showAiSettings && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-xl max-w-md w-full p-6 animate-in zoom-in-95">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold flex items-center gap-2 dark:text-white"><Brain className="w-5 h-5 text-primary-600" /> Configurazione AI</h3>
+                            <button onClick={() => setShowAiSettings(false)} className="text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Provider AI</label>
+                                <div className="grid grid-cols-2 gap-2 p-1 bg-neutral-100 dark:bg-neutral-900 rounded-xl">
+                                    <button 
+                                        onClick={() => setAiSettingsState({...aiSettings, provider: 'ollama'})}
+                                        className={`py-2 rounded-lg text-sm font-bold transition-all ${aiSettings.provider === 'ollama' ? 'bg-white dark:bg-neutral-800 shadow-sm text-primary-600' : 'text-neutral-500'}`}
+                                    >
+                                        Ollama (Locale)
+                                    </button>
+                                    <button 
+                                        onClick={() => setAiSettingsState({...aiSettings, provider: 'openrouter'})}
+                                        className={`py-2 rounded-lg text-sm font-bold transition-all ${aiSettings.provider === 'openrouter' ? 'bg-white dark:bg-neutral-800 shadow-sm text-primary-600' : 'text-neutral-500'}`}
+                                    >
+                                        OpenRouter (Cloud)
+                                    </button>
+                                </div>
+                            </div>
+
+                            {aiSettings.provider === 'ollama' ? (
+                                <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                    <div>
+                                        <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Ollama URL</label>
+                                        <input type="text" value={aiSettings.ollamaUrl || ''} onChange={e => setAiSettingsState({...aiSettings, ollamaUrl: e.target.value})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="http://127.0.0.1:11434" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Modello Ollama</label>
+                                        <input type="text" value={aiSettings.ollamaModel || ''} onChange={e => setAiSettingsState({...aiSettings, ollamaModel: e.target.value})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="llama3.2" />
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                    <div>
+                                        <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">OpenRouter API Key</label>
+                                        <input type="password" value={aiSettings.openRouterKey || ''} onChange={e => setAiSettingsState({...aiSettings, openRouterKey: e.target.value})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" placeholder="sk-or-..." />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Modello Cloud (OpenRouter)</label>
+                                        <select 
+                                            value={aiSettings.openRouterModel || ''} 
+                                            onChange={e => setAiSettingsState({...aiSettings, openRouterModel: e.target.value})} 
+                                            className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white"
+                                        >
+                                            <option value="google/gemma-2-9b-it:free">Gemma 2 9B (Free)</option>
+                                            <option value="google/gemma-4-31b-it:free">Gemma 4 31B (Free)</option>
+                                            <option value="openai/gpt-oss-120b:free">GPT OSS 120B (Free)</option>
+                                            <option value="liquid/lfm-2.5-1.2b-thinking:free">LFM 2.5 1.2B Thinking (Free)</option>
+                                            <option value="mistralai/mistral-7b-instruct:free">Mistral 7B (Free)</option>
+                                        </select>
+                                        <p className="text-[10px] text-neutral-500 mt-1">Puoi anche inserire manualmente un ID modello se non in lista.</p>
+                                        <input 
+                                            type="text" 
+                                            value={aiSettings.openRouterModel || ''} 
+                                            onChange={e => setAiSettingsState({...aiSettings, openRouterModel: e.target.value})} 
+                                            className="w-full mt-2 p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white text-xs" 
+                                            placeholder="provider/model:free" 
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Temperatura</label>
+                                    <input type="number" step="0.1" min="0" max="1" value={aiSettings.temperature} onChange={e => setAiSettingsState({...aiSettings, temperature: parseFloat(e.target.value)})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-1">Max Token</label>
+                                    <input type="number" value={aiSettings.numPredict} onChange={e => setAiSettingsState({...aiSettings, numPredict: parseInt(e.target.value)})} className="w-full p-2 border border-neutral-300 dark:border-neutral-600 rounded-lg dark:bg-neutral-700 dark:text-white" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-8 flex justify-end gap-3">
+                            <button onClick={() => setShowAiSettings(false)} className="px-4 py-2 text-neutral-600 font-bold hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg">Annulla</button>
+                            <button onClick={handleSaveAiSettings} className="px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700">Salva Impostazioni</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

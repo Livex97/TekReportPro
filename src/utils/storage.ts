@@ -252,8 +252,11 @@ export async function setCustomLayout(slotId: string, layout: CustomLayout): Pro
 }
 
 export interface AiSettings {
+    provider: 'ollama' | 'openrouter';
     ollamaUrl: string;
     ollamaModel: string;
+    openRouterKey?: string;
+    openRouterModel: string;
     temperature: number;
     numPredict: number;
     systemPrompt?: string;
@@ -261,8 +264,10 @@ export interface AiSettings {
 }
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
+    provider: 'ollama',
     ollamaUrl: 'http://127.0.0.1:11434',
     ollamaModel: 'llama3.2',
+    openRouterModel: 'google/gemma-2-9b-it:free',
     temperature: 0,
     numPredict: 350,
     notificationsEnabled: true

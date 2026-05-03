@@ -54,7 +54,17 @@ Output: {
   "tecnico": ""
 }`;
 
-export async function generateOllamaExtraction(text: string, signal?: AbortSignal): Promise<ExtractedData> {
+export async function generateAiExtraction(text: string, signal?: AbortSignal): Promise<ExtractedData> {
+  const settings = await getAiSettings();
+  
+  if (settings.provider === 'openrouter') {
+    return generateOpenRouterExtraction(text, signal);
+  } else {
+    return generateOllamaExtraction(text, signal);
+  }
+}
+
+async function generateOllamaExtraction(text: string, signal?: AbortSignal): Promise<ExtractedData> {
   const settings = await getAiSettings();
   
   const schema = {
@@ -72,60 +82,101 @@ export async function generateOllamaExtraction(text: string, signal?: AbortSigna
   };
 
   const systemPrompt = settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const prompt = `${systemPrompt}\n\nTesto:\n"""\n${text}\n"""`;
 
-  const prompt = `
-${systemPrompt}
+  const baseUrl = settings.ollamaUrl.replace(/\/$/, '');
+  const response = await fetch(`${baseUrl}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: signal,
+    body: JSON.stringify({
+      model: settings.ollamaModel,
+      prompt: prompt,
+      stream: false,
+      format: schema,
+      options: {
+        temperature: settings.temperature,
+        num_predict: settings.numPredict
+      }
+    })
+  });
 
-Testo:
-"""
-${text}
-"""
-`;
-
-  try {
-    const baseUrl = settings.ollamaUrl.replace(/\/$/, '');
-    const response = await fetch(`${baseUrl}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: signal,
-      body: JSON.stringify({
-        model: settings.ollamaModel,
-        prompt: prompt,
-        stream: false,
-        format: schema,
-        options: {
-          temperature: settings.temperature,
-          num_predict: settings.numPredict
-        }
-      })
-    });
-
-    if (!response.ok) {
-        let msg = 'Errore di connessione a Ollama';
-        try {
-            const errorData = await response.json();
-            msg = errorData.error || msg;
-        } catch(e) {}
-        throw new Error(msg);
-    }
-
-    const data = await response.json();
-    const result = JSON.parse(data.response);
-    
-    // Normalize to UPPERCASE as safety
-    const upper = (val: any) => (typeof val === 'string' ? val.trim().toUpperCase() : '');
-
-    return {
-        richiestaIntervento: upper(result.richiestaIntervento),
-        data: upper(result.data),
-        cliente: upper(result.cliente),
-        ubicazione: upper(result.ubicazione),
-        strumentoDaRiparare: upper(result.strumentoDaRiparare),
-        tipoDiAttivitaGuasto: upper(result.tipoDiAttivitaGuasto),
-        tecnico: upper(result.tecnico)
-    };
-  } catch (error) {
-    console.error('Ollama extraction error:', error);
-    throw error;
+  if (!response.ok) {
+    let msg = 'Errore di connessione a Ollama';
+    try {
+      const errorData = await response.json();
+      msg = errorData.error || msg;
+    } catch(e) {}
+    throw new Error(msg);
   }
+
+  const data = await response.json();
+  const result = JSON.parse(data.response);
+  return normalizeResult(result);
+}
+
+async function generateOpenRouterExtraction(text: string, signal?: AbortSignal): Promise<ExtractedData> {
+  const settings = await getAiSettings();
+  
+  if (!settings.openRouterKey) {
+    throw new Error("Chiave API OpenRouter mancante. Configurala nelle impostazioni.");
+  }
+
+  const systemPrompt = settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${settings.openRouterKey}`,
+      'HTTP-Referer': 'https://github.com/alessio/TekReportPro', // Optional
+      'X-Title': 'TekReportPro' // Optional
+    },
+    signal: signal,
+    body: JSON.stringify({
+      model: settings.openRouterModel,
+      messages: [
+        { role: 'system', content: systemPrompt + "\n\nIMPORTANTE: Rispondi ESCLUSIVAMENTE con un oggetto JSON valido." },
+        { role: 'user', content: `Estrai i dati dal seguente testo:\n\n${text}` }
+      ],
+      response_format: { type: "json_object" },
+      temperature: settings.temperature
+    })
+  });
+
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error("Limite di richieste raggiunto (Rate Limit). I modelli gratuiti di OpenRouter hanno limiti stretti. Riprova tra un minuto o usa Ollama.");
+    }
+    let msg = 'Errore di connessione a OpenRouter';
+    try {
+      const errorData = await response.json();
+      msg = errorData.error?.message || msg;
+    } catch(e) {}
+    throw new Error(msg);
+  }
+
+  const data = await response.json();
+  const content = data.choices[0].message.content;
+  
+  try {
+    const result = JSON.parse(content);
+    return normalizeResult(result);
+  } catch (e) {
+    console.error("OpenRouter JSON parse error:", content);
+    throw new Error("Il modello non ha restituito un JSON valido.");
+  }
+}
+
+function normalizeResult(result: any): ExtractedData {
+  const upper = (val: any) => (typeof val === 'string' ? val.trim().toUpperCase() : '');
+  return {
+    richiestaIntervento: upper(result.richiestaIntervento),
+    data: upper(result.data),
+    cliente: upper(result.cliente),
+    ubicazione: upper(result.ubicazione),
+    strumentoDaRiparare: upper(result.strumentoDaRiparare),
+    tipoDiAttivitaGuasto: upper(result.tipoDiAttivitaGuasto),
+    tecnico: upper(result.tecnico)
+  };
 }
